@@ -1,0 +1,41 @@
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+*$py.class
+
+# ===== Virtual env =====
+.venv/
+venv/
+env/
+
+# ===== Build / packaging =====
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ===== Logs =====
+*.log
+
+# ===== Env vars / secrets =====
+.env
+.env.*
+
+# ===== IDE =====
+.vscode/
+.idea/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Tests / coverage =====
+.coverage
+htmlcov/
+.pytest_cache/
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
