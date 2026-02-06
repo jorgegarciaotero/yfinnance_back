@@ -9,6 +9,7 @@ Daily job:
 
 from datetime import date, datetime, timedelta
 import sys
+import os
 import logging
 import pandas as pd
 import yfinance as yf
@@ -21,6 +22,10 @@ from src.config.settings import (
     YAHOO_DAILY_BACKFILL_YEARS,
     DEFAULT_LIMIT,
 )
+
+from src.config import settings
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join("src", "config", "service-account.json")
+
 
 
 # ─────────────────────────────────────────────
@@ -153,6 +158,7 @@ def load_prices(df: pd.DataFrame) -> None:
 
 def main(
     run_date: str | None = None,
+    end_date_arg: str | None = None,
     limit: int | None = DEFAULT_LIMIT,
 ) -> None:
     logger.info("starting daily_prices job")
@@ -167,6 +173,18 @@ def main(
         ).isoformat()
         end_date = date.today().isoformat()
         logger.info("backfill mode | %s -> %s", start_date, end_date)
+    elif run_date and end_date_arg:
+        start_date = run_date
+        end_date = (
+            datetime.fromisoformat(end_date_arg) + timedelta(days=1)
+        ).date().isoformat()
+        logger.info("range mode | %s -> %s (adjusted for inclusion)", start_date, end_date_arg)
+    elif run_date:
+        start_date = run_date
+        end_date = (
+            datetime.fromisoformat(run_date) + timedelta(days=1)
+        ).date().isoformat()
+        logger.info("daily mode | date = %s", run_date)
     else:
         if run_date is None:
             raise ValueError(
@@ -196,9 +214,44 @@ def main(
     logger.info("daily_prices job finished")
 
 
+
+
+def test_bigquery_connection() -> None:
+    """
+    Validates the connection to BigQuery by attempting to read 
+    the first record from the companies table.
+    """
+    logger.info(f"Attempting to connect to project: {PROJECT_ID}...")
+    client = bigquery.Client(project=PROJECT_ID)
+    
+    # Attempt to read only 1 row from the companies table
+    query = f"SELECT symbol FROM `{COMPANIES_TABLE}` LIMIT 1"
+    
+    try:
+        query_job = client.query(query)
+        results = list(query_job.result())
+        
+        if len(results) > 0:
+            logger.info("✅ SUCCESS! Connection established.")
+            logger.info(f"Successfully retrieved the first ticker: {results[0].symbol}")
+        else:
+            logger.warning("⚠️ Connection successful, but the companies table appears to be empty.")
+            
+    except Exception as e:
+        logger.error(f"❌ Connection ERROR: {e}")
+
+
+
+
 if __name__ == "__main__":
-    run_date = sys.argv[1] if len(sys.argv) > 1 else None
-    # Ejemplos:
-    # python -m src.jobs.daily_prices
-    # python -m src.jobs.daily_prices 2024-09-02
-    main(run_date=run_date)
+    # sys.argv[0] is the script name
+    # sys.argv[1] is the first argument (start_date / run_date)
+    # sys.argv[2] is the second argument (end_date_arg)
+    arg1 = sys.argv[1] if len(sys.argv) > 1 else None
+    arg2 = sys.argv[2] if len(sys.argv) > 2 else None
+    # Examples:
+    # 1. Automatic (Yesterday): python -m src.jobs.daily_prices
+    # 2. Single Day:           python -m src.jobs.daily_prices 2024-01-01
+    # 3. Date Range:           python -m src.jobs.daily_prices 2024-01-01 2024-01-31
+    main(run_date=arg1, end_date_arg=arg2, limit=None)
+    # test_bigquery_connection()
