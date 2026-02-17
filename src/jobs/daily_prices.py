@@ -164,12 +164,13 @@ def main(
 ) -> None:
     logger.info("starting daily_prices job")
 
+    json_path = os.path.join("src", "config", "service-account.json")
     
     if os.path.exists(json_path):
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = json_path
-        logger.info("Cargando credenciales desde JSON (Modo Local)")
+        logger.info("Loading credentials from: %s", json_path)
     else:
-        logger.info("No se encontró JSON, usando Identidad de Google Cloud (Modo Cloud)")
+        logger.info("Not found service-account.json, using default credentials")
 
     ensure_table()
 

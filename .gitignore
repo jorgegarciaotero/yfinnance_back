@@ -6,6 +6,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+**/service-account.json
+src/config/service-account.json
+
+
 # ===== Virtual env =====
 .venv/
 venv/

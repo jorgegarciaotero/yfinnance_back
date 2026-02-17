@@ -2,14 +2,16 @@ CREATE OR REPLACE TABLE `yfinance-gcp.yfinance_raw.enriched_prices_table` AS
 WITH base_stats AS (
   SELECT 
     date, symbol, close, high, low, volume,
-    AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) as sma_3,
-    AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) as sma_20,
+    -- Medias Móviles y Ventanas
+    AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 11 PRECEDING AND CURRENT ROW) as sma_12,
+    AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 25 PRECEDING AND CURRENT ROW) as sma_26,
     AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 49 PRECEDING AND CURRENT ROW) as sma_50,
     AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) as sma_200,
+    STDDEV(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) as stddev_20,
     MAX(high) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) as high_52w,
     MIN(low) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) as low_52w,
     close - LAG(close) OVER(PARTITION BY symbol ORDER BY date) as change,
-    STDDEV(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) as stddev_20
+    LAG(close, 10) OVER(PARTITION BY symbol ORDER BY date) as close_10d_ago
   FROM `yfinance-gcp.yfinance_raw.daily_prices`
 ),
 rsi_prep AS (
@@ -25,14 +27,52 @@ rsi_final AS (
   FROM rsi_prep
 )
 SELECT 
-  date, symbol, close, volume,
-  CASE WHEN avg_loss = 0 THEN 100 ELSE ROUND(100 - (100 / (1 + (avg_gain / avg_loss))), 2) END as rsi_14,
-  ROUND((close - high_52w) / NULLIF(high_52w, 0), 4) as pct_from_52w_high,
-  ROUND((close - low_52w) / NULLIF(low_52w, 0), 4) as pct_from_52w_low,
-  ROUND(sma_20 + (2 * stddev_20), 2) as bollinger_high,
-  ROUND(sma_20 - (2 * stddev_20), 2) as bollinger_low,
-  ROUND((close - (sma_20 - 2 * stddev_20)) / NULLIF(4 * stddev_20, 0), 2) as bollinger_pct,
-  CASE WHEN sma_50 > sma_200 THEN TRUE ELSE FALSE END as is_bullish_trend,
-  ROUND((close - sma_200) / NULLIF(sma_200, 0), 4) as dist_sma_200,
-  ROUND(volume / NULLIF(AVG(volume) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 19 PRECEDING AND CURRENT ROW), 0), 2) as volume_spike_ratio
-FROM rsi_final;
+  t.date, 
+  t.symbol, 
+  t.close, 
+  t.volume,
+  
+  -- --- DATOS FUNDAMENTALES (Corregidos con tu esquema real) ---
+  c.sector,
+  c.industry,
+  c.market_cap, -- Ahora sí funcionará
+  c.shares_outstanding,
+  
+  -- PER (Price to Earnings): Corregido a trailing_eps
+  c.trailing_eps,
+  CASE WHEN c.trailing_eps IS NOT NULL AND c.trailing_eps != 0 
+       THEN ROUND(t.close / c.trailing_eps, 2) 
+       ELSE NULL END as pe_ratio,
+
+  -- Riesgo Fundamental (Beta)
+  c.beta,
+  c.recommendation_key, -- Muy útil para la IA (Buy/Hold/Sell)
+
+  -- --- INDICADORES TÉCNICOS ---
+  CASE WHEN t.avg_loss = 0 THEN 100 ELSE ROUND(100 - (100 / (1 + (t.avg_gain / t.avg_loss))), 2) END as rsi_14,
+  
+  -- Distancia a Máximos/Mínimos
+  ROUND((t.close - t.high_52w) / NULLIF(t.high_52w, 0), 4) as pct_from_52w_high,
+  ROUND((t.close - t.low_52w) / NULLIF(t.low_52w, 0), 4) as pct_from_52w_low,
+  
+  -- Bandas de Bollinger
+  ROUND(t.sma_26 + (2 * t.stddev_20), 2) as bollinger_high,
+  ROUND(t.sma_26 - (2 * t.stddev_20), 2) as bollinger_low,
+  ROUND((t.close - (t.sma_26 - 2 * t.stddev_20)) / NULLIF(4 * t.stddev_20, 0), 2) as bollinger_pct,
+  
+  -- Tendencias (Texto para la IA)
+  CASE WHEN t.sma_50 > t.sma_200 THEN 'Bullish' ELSE 'Bearish' END as long_term_trend,
+  
+  -- Momentum (MACD Proxy)
+  ROUND(t.sma_12 - t.sma_26, 4) as macd_line,
+  
+  -- Momentum (Velocidad 10 días)
+  ROUND((t.close - t.close_10d_ago) / NULLIF(t.close_10d_ago, 0), 4) as momentum_10d,
+
+  -- Distancia SMA 200
+  ROUND((t.close - t.sma_200) / NULLIF(t.sma_200, 0), 4) as dist_sma_200
+
+FROM rsi_final t
+-- UNIÓN CON LA TABLA DE EMPRESAS
+LEFT JOIN `yfinance-gcp.yfinance_raw.companies` c
+  ON t.symbol = c.symbol;
