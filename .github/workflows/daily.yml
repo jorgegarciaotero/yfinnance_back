@@ -1,11 +1,7 @@
 name: Daily Pipeline
 
 on:
-  schedule:
-    # Lunes a viernes a las 06:00 UTC → 7h CET (invierno) / 8h CEST (verano)
-    # Recoge los datos del día anterior (mercados ya cerrados) y los tiene listos por la mañana
-    - cron: "0 6 * * 1-5"
-  workflow_dispatch:   # permite lanzarlo manualmente desde GitHub
+  workflow_dispatch:   # lanzamiento manual desde GitHub (la automatización corre en Cloud Scheduler)
 
 jobs:
   run:

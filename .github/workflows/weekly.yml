@@ -1,10 +1,7 @@
 name: Weekly Pipeline
 
 on:
-  schedule:
-    # Domingos a las 06:00 UTC (antes de que abran los mercados europeos el lunes)
-    - cron: "0 6 * * 0"
-  workflow_dispatch:
+  workflow_dispatch:   # lanzamiento manual desde GitHub (la automatización corre en Cloud Scheduler)
 
 jobs:
   run:
