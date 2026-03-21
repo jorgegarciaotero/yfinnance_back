@@ -1,0 +1,111 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ENRICH PRICES — INCREMENTAL (ventana rodante)
+--
+-- Calcula indicadores sobre los últimos 260 días de daily_prices
+-- (suficiente para SMA200 + buffer) y hace MERGE solo de los últimos 30 días.
+-- Mucho más barato que recrear la tabla completa cada día.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+MERGE `yfinance-gcp.yfinance_raw.enriched_prices_table` T
+USING (
+  WITH base_stats AS (
+    SELECT
+      date, symbol, close, high, low, volume,
+      AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 11  PRECEDING AND CURRENT ROW) as sma_12,
+      AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 25  PRECEDING AND CURRENT ROW) as sma_26,
+      AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 49  PRECEDING AND CURRENT ROW) as sma_50,
+      AVG(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) as sma_200,
+      STDDEV(close) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 19  PRECEDING AND CURRENT ROW) as stddev_20,
+      MAX(high) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) as high_52w,
+      MIN(low)  OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) as low_52w,
+      close - LAG(close) OVER(PARTITION BY symbol ORDER BY date) as change,
+      LAG(close, 10) OVER(PARTITION BY symbol ORDER BY date) as close_10d_ago
+    FROM `yfinance-gcp.yfinance_raw.daily_prices`
+    -- 260 días: suficiente para SMA200 (200) + ventana de salida (30) + buffer
+    WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 260 DAY)
+  ),
+  rsi_prep AS (
+    SELECT *,
+      CASE WHEN change > 0 THEN change ELSE 0 END as gain,
+      CASE WHEN change < 0 THEN ABS(change) ELSE 0 END as loss
+    FROM base_stats
+  ),
+  rsi_final AS (
+    SELECT *,
+      AVG(gain) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 13 PRECEDING AND CURRENT ROW) as avg_gain,
+      AVG(loss) OVER(PARTITION BY symbol ORDER BY date ASC ROWS BETWEEN 13 PRECEDING AND CURRENT ROW) as avg_loss
+    FROM rsi_prep
+  )
+  SELECT
+    t.date,
+    t.symbol,
+    t.close,
+    t.volume,
+    c.sector,
+    c.industry,
+    c.market_cap,
+    c.shares_outstanding,
+    c.trailing_eps,
+    CASE WHEN c.trailing_eps IS NOT NULL AND c.trailing_eps != 0
+         THEN ROUND(t.close / c.trailing_eps, 2)
+         ELSE NULL END as pe_ratio,
+    c.beta,
+    c.recommendation_key,
+    CASE WHEN t.avg_loss = 0 THEN 100
+         ELSE ROUND(100 - (100 / (1 + (t.avg_gain / t.avg_loss))), 2)
+    END as rsi_14,
+    ROUND((t.close - t.high_52w) / NULLIF(t.high_52w, 0), 4) as pct_from_52w_high,
+    ROUND((t.close - t.low_52w)  / NULLIF(t.low_52w,  0), 4) as pct_from_52w_low,
+    ROUND(t.sma_26 + (2 * t.stddev_20), 2) as bollinger_high,
+    ROUND(t.sma_26 - (2 * t.stddev_20), 2) as bollinger_low,
+    ROUND((t.close - (t.sma_26 - 2 * t.stddev_20)) / NULLIF(4 * t.stddev_20, 0), 2) as bollinger_pct,
+    CASE WHEN t.sma_50 > t.sma_200 THEN 'Bullish' ELSE 'Bearish' END as long_term_trend,
+    ROUND(t.sma_12 - t.sma_26, 4) as macd_line,
+    ROUND((t.close - t.close_10d_ago) / NULLIF(t.close_10d_ago, 0), 4) as momentum_10d,
+    ROUND((t.close - t.sma_200) / NULLIF(t.sma_200, 0), 4) as dist_sma_200
+
+  FROM rsi_final t
+  LEFT JOIN (
+    SELECT *
+    FROM `yfinance-gcp.yfinance_raw.companies`
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY updated_at DESC) = 1
+  ) c ON t.symbol = c.symbol
+
+  -- Solo los últimos 30 días: cubre fines de semana, festivos y runs fallidos
+  WHERE t.date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+
+) S
+ON T.date = S.date AND T.symbol = S.symbol
+
+WHEN MATCHED THEN UPDATE SET
+  close             = S.close,
+  volume            = S.volume,
+  sector            = S.sector,
+  industry          = S.industry,
+  market_cap        = S.market_cap,
+  shares_outstanding = S.shares_outstanding,
+  trailing_eps      = S.trailing_eps,
+  pe_ratio          = S.pe_ratio,
+  beta              = S.beta,
+  recommendation_key = S.recommendation_key,
+  rsi_14            = S.rsi_14,
+  pct_from_52w_high = S.pct_from_52w_high,
+  pct_from_52w_low  = S.pct_from_52w_low,
+  bollinger_high    = S.bollinger_high,
+  bollinger_low     = S.bollinger_low,
+  bollinger_pct     = S.bollinger_pct,
+  long_term_trend   = S.long_term_trend,
+  macd_line         = S.macd_line,
+  momentum_10d      = S.momentum_10d,
+  dist_sma_200      = S.dist_sma_200
+
+WHEN NOT MATCHED THEN INSERT
+  (date, symbol, close, volume, sector, industry, market_cap, shares_outstanding,
+   trailing_eps, pe_ratio, beta, recommendation_key, rsi_14,
+   pct_from_52w_high, pct_from_52w_low, bollinger_high, bollinger_low,
+   bollinger_pct, long_term_trend, macd_line, momentum_10d, dist_sma_200)
+VALUES
+  (S.date, S.symbol, S.close, S.volume, S.sector, S.industry, S.market_cap, S.shares_outstanding,
+   S.trailing_eps, S.pe_ratio, S.beta, S.recommendation_key, S.rsi_14,
+   S.pct_from_52w_high, S.pct_from_52w_low, S.bollinger_high, S.bollinger_low,
+   S.bollinger_pct, S.long_term_trend, S.macd_line, S.momentum_10d, S.dist_sma_200);

@@ -1,4 +1,6 @@
-CREATE OR REPLACE TABLE `yfinance-gcp.yfinance_raw.enriched_prices_table` AS
+CREATE OR REPLACE TABLE `yfinance-gcp.yfinance_raw.enriched_prices_table`
+PARTITION BY date
+AS
 WITH base_stats AS (
   SELECT 
     date, symbol, close, high, low, volume,
@@ -73,6 +75,10 @@ SELECT
   ROUND((t.close - t.sma_200) / NULLIF(t.sma_200, 0), 4) as dist_sma_200
 
 FROM rsi_final t
--- UNIÓN CON LA TABLA DE EMPRESAS
-LEFT JOIN `yfinance-gcp.yfinance_raw.companies` c
+-- UNIÓN CON LA TABLA DE EMPRESAS (solo snapshot más reciente por símbolo)
+LEFT JOIN (
+  SELECT *
+  FROM `yfinance-gcp.yfinance_raw.companies`
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY updated_at DESC) = 1
+) c
   ON t.symbol = c.symbol;
