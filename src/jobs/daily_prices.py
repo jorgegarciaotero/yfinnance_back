@@ -8,8 +8,6 @@ Daily job:
 """
 import sys
 import os
-sys.path.append(os.getcwd())
-
 from datetime import date, datetime, timedelta
 import logging
 import pandas as pd
@@ -144,15 +142,29 @@ def fetch_daily_prices(symbol: str, start: str, end: str) -> pd.DataFrame:
 def load_prices(df: pd.DataFrame) -> None:
     client = bigquery.Client(project=PROJECT_ID)
 
-    logger.info("loading %d rows into BigQuery", len(df))
+    logger.info("loading %d rows into BigQuery via MERGE", len(df))
+
+    staging_table = f"{DAILY_PRICES_TABLE}_staging"
 
     client.load_table_from_dataframe(
         df,
-        DAILY_PRICES_TABLE,
+        staging_table,
         job_config=bigquery.LoadJobConfig(
-            write_disposition="WRITE_APPEND"
+            write_disposition="WRITE_TRUNCATE"
         ),
     ).result()
+
+    merge_sql = f"""
+        MERGE `{DAILY_PRICES_TABLE}` T
+        USING `{staging_table}` S
+        ON T.date = DATE(S.date) AND T.symbol = S.symbol
+        WHEN NOT MATCHED THEN
+            INSERT (date, symbol, open, high, low, close, adj_close, volume)
+            VALUES (DATE(S.date), S.symbol, S.open, S.high, S.low, S.close, S.adj_close, S.volume)
+    """
+
+    client.query(merge_sql).result()
+    client.delete_table(staging_table)
 
     logger.info("load completed")
 
@@ -220,33 +232,6 @@ def main(
 
 
 
-def test_bigquery_connection() -> None:
-    """
-    Validates the connection to BigQuery by attempting to read 
-    the first record from the companies table.
-    """
-    logger.info(f"Attempting to connect to project: {PROJECT_ID}...")
-    client = bigquery.Client(project=PROJECT_ID)
-    
-    # Attempt to read only 1 row from the companies table
-    query = f"SELECT symbol FROM `{COMPANIES_TABLE}` LIMIT 1"
-    
-    try:
-        query_job = client.query(query)
-        results = list(query_job.result())
-        
-        if len(results) > 0:
-            logger.info("✅ SUCCESS! Connection established.")
-            logger.info(f"Successfully retrieved the first ticker: {results[0].symbol}")
-        else:
-            logger.warning("⚠️ Connection successful, but the companies table appears to be empty.")
-            
-    except Exception as e:
-        logger.error(f"❌ Connection ERROR: {e}")
-
-
-
-
 if __name__ == "__main__":
     json_path = os.path.join("src", "config", "service-account.json")
     # sys.argv[0] is the script name
@@ -259,4 +244,3 @@ if __name__ == "__main__":
     # 2. Single Day:           python -m src.jobs.daily_prices 2024-01-01
     # 3. Date Range:           python -m src.jobs.daily_prices 2024-01-01 2024-01-31
     main(run_date=arg1, end_date_arg=arg2, limit=None)
-    # test_bigquery_connection()
