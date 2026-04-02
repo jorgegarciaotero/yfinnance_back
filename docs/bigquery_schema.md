@@ -4,47 +4,48 @@ Financial data pipeline sourcing from Yahoo Finance. Covers ~2,700 stocks from S
 
 ---
 
-## `daily_picks` — Top 20 daily opportunities
+## `sector_daily_opportunities` — Sector-based daily investment setups
 
-**The main output table.** Updated every trading day after market close. Contains the top 20 stock opportunities ranked by score (0–100), classified as ALCISTA (strong uptrend entry) or DIP (macro correction on a solid uptrend). The `reason` column explains in plain English why each stock was selected.
+**The main output table.** Updated every trading day after market close. For each sector, extracts up to 10 companies in three distinct setup categories, each with a composite score (0–100) and a plain-English reason. Partitioned by `date`, clustered by `sector` and `setup_type` for efficient queries.
 
-Filters applied: market cap ≥ $5B · Bullish trend now and 3 months ago · Analysts: buy or strong_buy only · Max –35% from 52-week high · Within 10% of SMA200.
+**Setup categories:**
+- `Dip (Tendencia Alcista)` — confirmed Bullish trend with RSI in oversold zone (30–45) and negative momentum. Best dip-buying entries within an uptrend.
+- `Momentum (Líderes)` — sector leaders near their 52-week highs with strong momentum (>+2% in 10d) and RSI in momentum zone (55–75).
+- `Value Reversal` — deep corrections (>−30% from 52w high) with low PE ratio (<20) and analyst buy/strong_buy consensus.
 
-Score breakdown (25 pts each): **A** momentum/prior strength · **B** RSI timing · **C** structural health vs SMA200 · **D** analyst consensus.
+**Score (0–100, 4 components × 25 pts):**
+
+| Setup | A | B | C | D |
+|-------|---|---|---|---|
+| Dip | RSI oversold depth | Health vs SMA200 | Analyst consensus | Market cap quality |
+| Momentum | Momentum 10d strength | RSI sweet spot (bell at 65) | Closeness to 52w high | Analyst consensus |
+| Value Reversal | PE quality (lower = better) | Upside potential depth | Analyst consensus | Market cap quality |
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `date` | DATE | Date the picks were generated |
-| `rank` | INTEGER | Position in today's ranking (1 = best) |
-| `tipo` | STRING | `ALCISTA` (uptrend entry) or `DIP` (macro correction) |
-| `symbol` | STRING | Stock ticker (e.g. AAPL, ASML.AS) |
+| `date` | DATE | Date the opportunities were generated (partition key) |
 | `sector` | STRING | Sector (e.g. Technology, Financials) |
 | `industry` | STRING | Industry within the sector |
-| `data_date` | DATE | Last trading day with available data |
+| `symbol` | STRING | Stock ticker (e.g. AAPL, ASML.AS) |
+| `setup_type` | STRING | `Dip (Tendencia Alcista)`, `Momentum (Líderes)`, or `Value Reversal` |
 | `close` | FLOAT | Closing price |
-| `market_cap_bn` | FLOAT | Market cap in billions USD |
+| `market_cap_bn` | FLOAT | Market capitalisation in billions USD |
 | `rsi_14` | FLOAT | RSI 14-period (0–100). <30 oversold, >70 overbought |
 | `momentum_10d_pct` | FLOAT | Price change % over last 10 trading days |
 | `dist_sma200_pct` | FLOAT | % distance from SMA200 (positive = above) |
 | `pct_from_52w_high` | FLOAT | % drop from 52-week high (negative value) |
-| `chg_1d_pct` | FLOAT | Price change % in last 1 day |
-| `chg_3d_pct` | FLOAT | Price change % in last 3 days |
-| `chg_5d_pct` | FLOAT | Price change % in last 5 days |
-| `perf_6m_pct` | FLOAT | Performance % in the 6 months before the dip (DIP type) |
-| `perf_1y_pct` | FLOAT | Performance % in the 1 year before the dip (DIP type) |
-| `recommendation_key` | STRING | Analyst consensus: `strong_buy` or `buy` |
-| `score_a` | FLOAT | Score component A: momentum / prior strength (0–25) |
-| `score_b` | FLOAT | Score component B: RSI timing (0–25) |
-| `score_c` | FLOAT | Score component C: structural health vs SMA200 (0–25) |
-| `score_d` | FLOAT | Score component D: analyst consensus (0–25) |
-| `score_total` | FLOAT | Total score (0–100) |
+| `pct_from_52w_low` | FLOAT | % gain from 52-week low (positive value) |
+| `pe_ratio` | FLOAT | Price-to-earnings ratio (close / trailing_eps) |
+| `recommendation_key` | STRING | Analyst consensus: `strong_buy`, `buy`, `hold`, `underperform`, `sell` |
+| `score` | FLOAT | Composite score 0–100 (higher = better opportunity within its category) |
+| `rank_in_sector` | INTEGER | Rank within its sector + setup_type (1 = best, max 10) |
 | `reason` | STRING | Plain-English explanation of why this stock was selected |
 
 ---
 
 ## `enriched_prices_table` — Prices + technical & fundamental indicators
 
-Full price history for all tracked stocks enriched with technical indicators and fundamental data. Updated daily. This is the analytical core of the pipeline — source for `daily_picks`.
+Full price history for all tracked stocks enriched with technical indicators and fundamental data. Updated daily. Source for `sector_daily_opportunities`.
 
 | Column | Type | Description |
 |--------|------|-------------|

@@ -11,7 +11,6 @@ GCS_BUCKET = "yfinance-cache"
 COMPANIES_TABLE = f"{PROJECT_ID}.{DATASET}.companies"
 DAILY_PRICES_TABLE = f"{PROJECT_ID}.{DATASET}.daily_prices"
 ENRICHED_PRICES_TABLE = f"{PROJECT_ID}.{DATASET}.enriched_prices_table"
-DAILY_PICKS_TABLE = f"{PROJECT_ID}.{DATASET}.daily_picks"
 SECTOR_OPPORTUNITIES_TABLE = f"{PROJECT_ID}.{DATASET}.sector_daily_opportunities"
 
 # ─────────────────────────────────────────────

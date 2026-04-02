@@ -1,6 +1,6 @@
 # yFinance GCP
 
-Financial data pipeline that downloads prices and fundamentals from Yahoo Finance, stores them in BigQuery, and runs a quantitative screener to surface the top 20 stock opportunities every trading day.
+Financial data pipeline that downloads prices and fundamentals from Yahoo Finance, stores them in BigQuery, and surfaces daily investment opportunities per sector for educational front-ends.
 
 ## Architecture
 
@@ -13,11 +13,13 @@ Yahoo Finance (yfinance)
                                  daily_enrich  ──────────────────────────────────► enriched_prices_table
                                  (enrich_prices.bsql)                              (prices + technical indicators)
                                                                                             │
-                                                                                     daily_picks ──► daily_picks
-                                                                                     (daily_picks.bsql)
+                                                                              daily_sector_opportunities
+                                                                              (sector_opportunities_incremental.bsql)
+                                                                                            │
+                                                                                 sector_daily_opportunities
 ```
 
-**Stack:** Python 3.11+ · BigQuery (google-cloud-bigquery) · GitHub Actions · Cloud Scheduler
+**Stack:** Python 3.11+ · BigQuery (google-cloud-bigquery) · Cloud Run Jobs · Cloud Scheduler
 
 ---
 
@@ -28,43 +30,40 @@ Yahoo Finance (yfinance)
 | `weekly_companies` | Weekly (Sunday) | Refreshes the stock universe (~2,700 symbols from S&P 500, Russell 2000, STOXX 600). Validates availability on Yahoo Finance and stores fundamentals (sector, market cap, ratios, analyst consensus). MERGE by `(symbol, updated_at)`. |
 | `daily_prices` | Daily (Mon–Fri) | Downloads OHLCV prices. Backfills 5 years on first run; otherwise loads only the requested date. MERGE by `(date, symbol)` — never duplicates. |
 | `daily_enrich` | Daily, after `daily_prices` | Rebuilds `enriched_prices_table` via `enrich_prices.bsql`: calculates RSI, SMA 50/200, MACD, Bollinger Bands, momentum, and joins with fundamentals. Falls back to incremental MERGE when the table is up to date. |
-| `daily_picks` | Daily, after `daily_enrich` | Runs the Daily Picks screener and upserts top 20 opportunities into `daily_picks` via MERGE by `(date, symbol)`. |
+| `daily_sector_opportunities` | Daily, after `daily_enrich` | Runs the sector screener and writes up to 10 opportunities per sector × 3 setup types into `sector_daily_opportunities`. DELETE + INSERT on max_date (idempotent). |
 
 ---
 
-## Daily Picks Screener
+## Sector Opportunities Screener
 
-Every trading day the screener selects the **top 20 stocks** across two opportunity types:
+Every trading day the screener selects up to **10 stocks per sector** in three setup categories:
 
-- **ALCISTA** — stocks in a confirmed uptrend with healthy momentum. Entry in trend.
-- **DIP** — stocks with a solid uptrend that have dropped 5–25% in 5 days due to macro factors. Discounted entry.
+- **Dip (Tendencia Alcista)** — confirmed Bullish trend, RSI 30–45 (oversold), negative momentum. Entry in dip within uptrend.
+- **Momentum (Líderes)** — sector leaders within 10% of 52-week high, RSI 55–75, momentum >+2% in 10d.
+- **Value Reversal** — deep corrections (>−30% from 52w high), PE ratio 0–20, analyst buy/strong_buy consensus.
 
-**Strict filters (both types):**
-- Market cap ≥ $5B
-- Bullish trend today and 3 months ago
-- Analyst consensus: `buy` or `strong_buy` only
-- Max −35% from 52-week high (no broken stocks)
-- Within 10% of SMA200
+**Base filters (all categories):** close > $5 · market cap > $2B · sector not null.
 
-**Score 0–100 (same structure for both types):**
+**Score 0–100 (4 components × 25 pts):**
 
-| Component | Pts | ALCISTA | DIP |
-|-----------|-----|---------|-----|
-| A — Momentum / Prior strength | 25 | 10d momentum (+3%→0, +15%→25) | 1y performance before dip (+10%→0, +100%→25) |
-| B — RSI timing | 25 | Bell curve centered at RSI 58 (range 45–70) | Oversold RSI (50→0pts, 20→25pts) |
-| C — Structural health | 25 | Distance above SMA200 (0%→0, +20%→25) | Same |
-| D — Analyst consensus | 25 | `strong_buy`=25, `buy`=15 | Same |
+| Component | Dip | Momentum | Value Reversal |
+|-----------|-----|----------|----------------|
+| A | RSI oversold depth | Momentum 10d strength | PE quality (lower = better) |
+| B | Health vs SMA200 | RSI sweet spot (bell at 65) | Upside potential depth |
+| C | Analyst consensus | Closeness to 52w high | Analyst consensus |
+| D | Market cap quality | Analyst consensus | Market cap quality |
 
-Each row in `daily_picks` includes a `reason` field with a plain-English explanation:
+Each row includes a `reason` field with a plain-English explanation:
 
 ```
-rank 1 | DIP | ASML.AS
-"Macro dip -11.3% in 5d on confirmed uptrend. Prior strength: +58.4% in 1y before dip.
- RSI 34 (oversold). 8.2% above SMA200. Analysts: strong_buy."
+sector: Technology | setup: Dip (Tendencia Alcista) | rank 1 | ASML.AS
+"Bullish trend with RSI 34 in oversold zone. Momentum -6.2% in 10d (dip). 8.1% above SMA200. Analysts: strong_buy."
 
-rank 2 | ALCISTA | MSFT
-"Confirmed uptrend (Bullish now & 3m ago). Momentum +8.4% in 10d.
- RSI 58 (healthy zone). 12.1% above SMA200. -8.3% from 52w high. Analysts: buy."
+sector: Technology | setup: Momentum (Líderes) | rank 1 | NVDA
+"Momentum +9.4% in 10d. RSI 67 (momentum zone). -3.1% from 52w high. Analysts: strong_buy."
+
+sector: Healthcare | setup: Value Reversal | rank 1 | PFE
+"-44.2% from 52w high (deep correction). PE ratio: 9.3x. RSI 28. Analysts: buy."
 ```
 
 ---
@@ -73,7 +72,7 @@ rank 2 | ALCISTA | MSFT
 
 | Table | Description |
 |-------|-------------|
-| `daily_picks` | **Main output.** Top 20 daily opportunities with score 0–100 and reason text |
+| `sector_daily_opportunities` | **Main output.** Up to 10 opportunities per sector × 3 setup types, score 0–100, reason text |
 | `enriched_prices_table` | Full price history with technical indicators and fundamentals |
 | `daily_prices` | Raw OHLCV prices |
 | `companies` | Company fundamentals, one snapshot per symbol per week |
@@ -117,8 +116,8 @@ python -m src.jobs.daily_prices 2025-01-01 2025-01-31  # date range
 # Rebuild enriched table
 python -m src.jobs.daily_enrich
 
-# Generate daily picks
-python -m src.jobs.daily_picks
+# Generate sector opportunities
+python -m src.jobs.daily_sector_opportunities
 
 # Limit to N companies (for testing)
 python -m src.jobs.weekly_companies 5
@@ -128,16 +127,5 @@ python -m src.jobs.weekly_companies 5
 
 ```
 Sunday:   weekly_companies → daily_enrich
-Mon–Fri:  daily_prices → daily_enrich → daily_picks
+Mon–Fri:  daily_prices → daily_enrich → daily_sector_opportunities
 ```
-
----
-
-## GitHub Actions
-
-Pipelines run automatically via Cloud Scheduler (triggers GitHub Actions workflows):
-
-- **Daily** (`daily.yml`): Mon–Fri — `daily_prices` → `daily_enrich` → `daily_picks`
-- **Weekly** (`weekly.yml`): Sundays — `weekly_companies` → `daily_enrich`
-
-GCP credentials are injected from the `GCP_SERVICE_ACCOUNT_KEY` secret (Settings → Secrets → Actions).

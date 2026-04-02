@@ -24,9 +24,9 @@ gcloud run jobs update daily-enrich-job \
   --region "$REGION" \
   --project "$PROJECT_ID"
 
-gcloud run jobs update daily-scanner-job \
+gcloud run jobs update daily-sector-job \
   --image "$IMAGE" \
-  --args "src/jobs/daily_picks.py" \
+  --args "src/jobs/daily_sector_opportunities.py" \
   --region "$REGION" \
   --project "$PROJECT_ID"
 
