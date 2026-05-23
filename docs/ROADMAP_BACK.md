@@ -18,11 +18,19 @@ Para el estado de la interfaz de usuario y visualización, consulta `ROADMAP_FRO
 ## 🟢 FASE 2: Screener Sectorial y Setups Educativos (Completada)
 **Objetivo:** Clasificar el mercado por sectores para enseñar a identificar patrones recurrentes (Setups) en lugar de perseguir "hot stocks".
 
-- [x] **Creación de `sector_daily_opportunities`**: Tabla particionada que guarda el Top 10 diario por sector.
-- [x] **Implementación de Setups**: 
+- [x] **Creación de `sector_daily_opportunities`**: Tabla particionada que guarda el Top 3 diario por sector aplicando estrictos "Quality Gates" (Filtro anti-chicharros: liquidez, PE positivo, EPS y respaldo de analistas).
+- [x] **Implementación de Setups**:
     - *Dip (Tendencia Alcista)*: Comprar correcciones en mercados fuertes.
     - *Momentum (Líderes)*: Seguir la fuerza relativa y roturas de máximos.
     - *Value Reversal*: Identificar giros al alza en empresas muy castigadas pero con buenos fundamentales.
+- [x] **Curación reforzada del screener** (2026-05-23): bajar de ~280 picks/día a ~30-75 sin perder buenas oportunidades.
+    - Top 3 por (sector, setup) en lugar de Top 15.
+    - **Score floor de 60/100** — candidatos por debajo se descartan.
+    - **Cap global de 75 filas/día** por `score DESC`.
+    - Filtro de liquidez: `close × volume > $10M/día`.
+    - **Régimen de mercado**: setup *Momentum* sólo se activa si el breadth alcista del universo ≥ 50%.
+    - *Dip* refinado: RSI 30-40 (antes 30-45), `dist_sma_200 > 5%` (tendencia real), momentum entre -10% y -1% (corrección controlada, no caída libre).
+    - *Value Reversal* anti-falling-knife: `trailing_eps > 0`, RSI > 35, momentum_10d > -5%, profundidad acotada entre -50% y -30% desde máximos 52w.
 
 ---
 
@@ -31,7 +39,7 @@ Para el estado de la interfaz de usuario y visualización, consulta `ROADMAP_FRO
 
 - [x] **Ingesta de ETFs de Commodities**: Añadidos a `companies` con `source = "commodities"`: Oro `GLD`, Plata `SLV`, Petróleo `USO`, Cobre `CPER`, Platino `PPLT`, Uranio `URA`.
 - [x] **Bonos**: Añadidos `TLT` (bono 20a) e `IEF` (bono 7-10a) a `companies` con `source = "bonds"`.
-- [x] **Ranking de Anomalías Sectoriales** → tabla `anomaly_radar`: Motor que detecta en 1d/3d/7d/30d descartando activos planos. Top 5 por sector en 3 tipos:
+- [x] **Ranking de Anomalías Sectoriales** → tabla `anomaly_radar`: Motor que detecta en 1d/3d/7d/30d descartando activos planos. Incluye categorización por capitalización (`cap_category`) para separar "Chicharros" de grandes empresas. Top 5 por sector en 3 tipos:
     - *Spike Volumen/Precio*: Impulso ≥3% en 1d o ≥7% en 3d, con volumen ≥1.5× media 20d.
     - *Sobrevendido Crítico*: RSI < 30 + caída ≥8% en 3d o ≥12% en 7d. Candidatos a rebote.
     - *Inercia Confirmada*: +8% en 30d, +2% en 7d, sin reversión en 3d. Líderes sostenidos.
@@ -75,10 +83,12 @@ Para el estado de la interfaz de usuario y visualización, consulta `ROADMAP_FRO
     - Domingo 10:00 `weekly-companies-cron`
     - `deploy.sh` actualizado para gestionar schedulers en cada despliegue.
 - [ ] **Hosting y Dominio (Low-Cost)**: Despliegue en plataformas de bajo coste o capa gratuita (ej. Render, Railway, Fly.io, PythonAnywhere).
-- [ ] **Gobernanza de Costes BigQuery** (Crítico):
-    - Implementar **límite de facturación estricto de 100€/mes** en GCP con alertas automáticas.
-    - **Arquitectura de Tablas de Resultados Pre-calculados**: Crear una tabla resumen diaria (caché en BigQuery) que contenga los rankings del Radar de Anomalías, indicadores técnicos condensados y narrativas generadas.
-    - Batch jobs nocturnos (scheduled queries) que actualizan la tabla caché una sola vez al día, amortizando costes.
+- [~] **Gobernanza de Costes BigQuery** (Crítico, en progreso):
+    - [x] **Saneamiento de `enriched_prices_table`** (2026-05-23): eliminado bug histórico de duplicación 4× heredado de versiones previas del MERGE. La tabla pasó de 4.124.303 → 1.032.471 filas (800 MB → 200 MB).
+    - [x] **Particionado y clustering**: `enriched_prices_table` ahora particionada por `date` y clusterizada por `symbol`. Una query `WHERE date = X` pasa de escanear ~800 MB a **~21 KB** (mejora 40.000×). Aplica a todos los jobs downstream (sector, anomaly, narrative).
+    - [ ] **Límite de facturación estricto de 100€/mes** en GCP con alertas automáticas.
+    - [ ] **Arquitectura de Tablas de Resultados Pre-calculados** para el front-end: una tabla resumen diaria que la web consuma, sin tocar tablas raw.
+    - [ ] Batch jobs nocturnos (scheduled queries) que actualizan la tabla caché una sola vez al día, amortizando costes.
 - [ ] **Despliegue y CI/CD básico**: Configurar GitHub Actions para que los despliegues a producción se hagan de forma automática y segura tras cada cambio validado en el código.
 - [ ] **Monitorización Back-end**: Integración con herramientas (ej. Sentry gratuitas) para capturar *tracebacks* y fallos de conexión a APIs en el lado del servidor.
 

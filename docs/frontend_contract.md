@@ -124,6 +124,34 @@ ORDER BY source, published_at DESC
 
 ---
 
+### 4. `market_insights` — Termómetro de Mercado (YouTube & Macro)
+
+**Cuándo se actualiza:** una vez al día.
+**Qué contiene:** análisis estructurados con IA de vídeos de YouTube financieros y feeds RSS de noticias.
+
+```sql
+SELECT *
+FROM `yfinance-gcp.yfinance_raw.market_insights`
+WHERE date = (SELECT MAX(date) FROM `yfinance-gcp.yfinance_raw.market_insights`)
+ORDER BY source_type, source_name
+```
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `date` | DATE | Fecha del análisis |
+| `source_type` | STRING | `"youtube"` \| `"rss"` |
+| `source_name` | STRING | Canal (ej. "Bolsacava", "The Macro Compass") |
+| `title` | STRING | Título original del vídeo o resumen de noticias |
+| `url` | STRING | Enlace al vídeo o al feed original |
+| `market_bias` | STRING | Sesgo general: `"Bullish"`, `"Bearish"`, `"Neutral"`, `"N/A"` |
+| `macro_event` | STRING | Evento clave mencionado (ej. "Dato del IPC") |
+| `smart_money_signals` | STRING | Resumen de 1 frase sobre engaños o liquidez |
+| `key_levels` | STRING | Array JSON serializado (ej. `[{"activo": "SP500", "soporte": 5100}]`) |
+| `mentioned_tickers` | STRING | Activos mencionados separados por comas (ej. "SP500,ORO,NVDA") |
+| `tesis_principal` | STRING | Resumen ejecutivo del vídeo en 2 frases |
+
+---
+
 ## UI Copy — Títulos y Descripciones
 
 Los textos de cada sección (títulos, descripciones, labels por tipo) están centralizados en **`docs/ui_copy.json`**. El frontend debe cargar ese archivo como fuente de verdad para toda la copia UI, no hardcodear strings.
@@ -221,6 +249,20 @@ ORDER BY symbol
 
 ---
 
+### Sección 4 — "Termómetro de Mercado" (Macro Insights)
+
+**Fuente:** `market_insights`
+
+**Diseño sugerido:**
+- **Cabecera (Dashboard):** Un indicador visual (Gauge/Velocímetro) que sume cuántas fuentes están `Bullish` vs `Bearish` ese día.
+- **Nube de Activos:** Extraer y agrupar los tickers de `mentioned_tickers` (ej. si 4 analistas hablan del "Oro", destacarlo).
+- **Feed de Analistas (Tarjetas):** Una cuadrícula (Grid) o lista con una tarjeta por cada fuente (`source_name`).
+  - Destacar la `tesis_principal` como texto principal.
+  - Píldoras (Badges) con el `market_bias` (Verde/Rojo) y el `macro_event`.
+  - Un Callout destacado para las `smart_money_signals`.
+
+---
+
 ## TypeScript Types
 
 ```typescript
@@ -301,6 +343,20 @@ export interface CompanyNewsItem {
   score: number | null          // Reddit upvotes; null for Yahoo
   num_comments: number | null
   publisher: string | null
+}
+
+export interface MarketInsightItem {
+  date: string;
+  source_type: 'youtube' | 'rss';
+  source_name: string;
+  title: string | null;
+  url: string | null;
+  market_bias: 'Bullish' | 'Bearish' | 'Neutral' | 'N/A';
+  macro_event: string | null;
+  smart_money_signals: string | null;
+  key_levels: string | null;      // JSON stringified array
+  mentioned_tickers: string | null; // Comma separated
+  tesis_principal: string | null;
 }
 ```
 
