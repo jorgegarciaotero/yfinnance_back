@@ -1,6 +1,7 @@
-# Roadmap y Arquitectura: Plataforma Educativa de Inversión
+# ⚙️ Roadmap Backend & Data: Market Atelier
 
-Este documento refleja el estado actual del backend de datos (BigQuery + Python) y las futuras vías de desarrollo para alimentar el front-end educativo de inversión. El objetivo es transicionar de un simple "stock screener" a una plataforma de inteligencia financiera con alto valor curado.
+Este documento refleja el estado actual del backend de datos (BigQuery + Python) y las futuras vías de desarrollo para la plataforma de inteligencia financiera. 
+Para el estado de la interfaz de usuario y visualización, consulta `ROADMAP_FRONT.md`.
 
 ---
 
@@ -25,7 +26,7 @@ Este documento refleja el estado actual del backend de datos (BigQuery + Python)
 
 ---
 
-## 🟢 FASE 3: Radar de Anomalías (Completada)
+## 🟡 FASE 3: Radar de Anomalías (Completada)
 **Objetivo:** Identificar oportunidades reales descartando el ruido del mercado mediante detección y clasificación de anomalías en multiples horizontes temporales.
 
 - [x] **Ingesta de ETFs de Commodities**: Añadidos a `companies` con `source = "commodities"`: Oro `GLD`, Plata `SLV`, Petróleo `USO`, Cobre `CPER`, Platino `PPLT`, Uranio `URA`.
@@ -39,7 +40,7 @@ Este documento refleja el estado actual del backend de datos (BigQuery + Python)
 
 ---
 
-## 🟢 FASE 4: Narrativas de Movimiento (Completada)
+## 🔵 FASE 4: Narrativas de Movimiento (Completada)
 **Objetivo:** Cruzar los datos técnicos del Radar de Anomalías con la narrativa real que mueve el mercado ("El Por Qué"). Aportar un nivel de curación alto que genere *engagement* diario **optimizando costes de API**.
 
 - [x] **Fuentes de noticias**: Yahoo Finance news (vía yfinance) y Reddit (r/stocks, r/investing, r/wallstreetbets) sin API key. Almacenadas en tabla `company_news`. Job: `daily-news-job`.
@@ -51,32 +52,35 @@ Este documento refleja el estado actual del backend de datos (BigQuery + Python)
 
 ---
 
-## 🔴 FASE 5: Producto Final (Front-end)
-**Objetivo:** Una interfaz de usuario limpia, enfocada en la legibilidad y el alto "Signal-to-Noise ratio" (mucho valor, poco ruido).
+## 🔵 FASE 4.5: Inteligencia Macro y "Newsletter" (Nuevo)
+**Objetivo:** Recopilar visión general del mercado (no solo por ticker) resumiendo canales de YouTube financieros clave y noticias macro, sirviendo como contenido diario para la portada o una newsletter.
 
-- [ ] **Sección de "Radar Diario"**: Dividido por los 3 Setups.
-- [ ] **Sección "Macro & Materias Primas"**: Semáforo de la economía con los ETFs de commodities y bonos.
-- [ ] **Sección "Narrativa Semanal"**: Un resumen automático curado de lo que más se está hablando en Substack/Reddit cruzado con los sectores que más están subiendo.
+- [x] **Tabla BigQuery `market_insights`**: Crear tabla para almacenar los análisis estructurados (bias, tesis, niveles clave) de cada fuente.
+- [x] **Ingesta de YouTube (`youtube-transcript-api`)**: Extraer subtítulos de los últimos vídeos de una lista curada de canales de YouTube financieros sin usar API Keys que limiten por cuota.
+- [x] **Ingesta de Noticias Macro (RSS)**: Leer feeds RSS públicos gratuitos (CNBC, Yahoo Finance Macro, Substacks seleccionados) usando la librería `feedparser`.
+- [x] **Resumen con LLM (Claude Haiku)**: Nuevo Cloud Run Job (`daily-newsletter-job`) que procese las transcripciones y las noticias del día para generar resúmenes ejecutivos ("Qué ha pasado hoy en el mercado").
 
 ---
 
-## 🟣 FASE 6: Infraestructura, Monitorización y Producción
+## � FASE 5: Producto Final (Front-end)
+*Nota: Todos los hitos de interfaz de usuario, experiencia y visualización de datos han sido movidos a `ROADMAP_FRONT.md` para ser gestionados por el equipo frontend.*
+
+---
+
+## 🟣 FASE 6: Infraestructura, Back-end y Producción
 **Objetivo:** Desplegar la aplicación de forma económica, segura y controlada para evitar costes desorbitados y poder medir el uso real.
 
 - [x] **Cloud Scheduler completo** (2026-05-07): 7 triggers configurados en `europe-west1` (Madrid). Pipeline completo automatizado lun-vie:
     - 05:00 `daily-prices-cron` → 05:30 `daily-enrich-cron` → 07:00 `daily-sector-cron` + `daily-anomaly-cron` → 08:00 `daily-news-cron` → 09:00 `daily-narrative-cron`
     - Domingo 10:00 `weekly-companies-cron`
     - `deploy.sh` actualizado para gestionar schedulers en cada despliegue.
-- [ ] **Hosting y Dominio (Low-Cost)**: Despliegue en plataformas de bajo coste o capa gratuita (ej. Render, Railway, Fly.io, PythonAnywhere) y compra de un dominio asequible en Cloudflare o Namecheap.
+- [ ] **Hosting y Dominio (Low-Cost)**: Despliegue en plataformas de bajo coste o capa gratuita (ej. Render, Railway, Fly.io, PythonAnywhere).
 - [ ] **Gobernanza de Costes BigQuery** (Crítico):
     - Implementar **límite de facturación estricto de 100€/mes** en GCP con alertas automáticas.
     - **Arquitectura de Tablas de Resultados Pre-calculados**: Crear una tabla resumen diaria (caché en BigQuery) que contenga los rankings del Radar de Anomalías, indicadores técnicos condensados y narrativas generadas.
-    - **Frontend jamás consulta tablas raw**: El frontend solo consulta la tabla de resultados pre-calculados (particionada por fecha), reduciendo costes de consulta a prácticamente cero.
     - Batch jobs nocturnos (scheduled queries) que actualizan la tabla caché una sola vez al día, amortizando costes.
-- [ ] **Control de Costes y Rate Limiting**: Implementar limitación de peticiones (Rate Limiting) por IP o usuario para proteger el backend y evitar picos de facturación en BigQuery y APIs.
-- [ ] **Estrategia de Caché Avanzada**: Servir los datos cacheados (Redis, SQLite o en memoria) para el 99% de las visitas, actualizando la caché solo una vez al día con cron jobs.
-- [ ] **Monitorización y Trazabilidad de Errores**: Integración con herramientas (ej. Sentry gratuitas) para capturar *tracebacks* y bugs que experimenten los usuarios tanto en front como en back.
-- [ ] **Analítica Web Privada y Ligera**: Uso de herramientas tipo Plausible Analytics, Umami o Google Analytics básico para entender qué secciones atraen más tráfico y medir la retención.
+- [ ] **Despliegue y CI/CD básico**: Configurar GitHub Actions para que los despliegues a producción se hagan de forma automática y segura tras cada cambio validado en el código.
+- [ ] **Monitorización Back-end**: Integración con herramientas (ej. Sentry gratuitas) para capturar *tracebacks* y fallos de conexión a APIs en el lado del servidor.
 
 ---
 
@@ -86,4 +90,3 @@ Este documento refleja el estado actual del backend de datos (BigQuery + Python)
 - [ ] **Showcase Técnico (Portfolio)**: Crear una sección "Acerca de / Arquitectura" en la propia web que explique gráficamente el pipeline de datos y el stack (BigQuery + Python + LLMs) pensado para reclutadores.
 - [ ] **SEO (Search Engine Optimization)**: Optimización de meta-etiquetas, URLs semánticas y generación de *Sitemaps* dinámicos para que los buscadores indexen páginas de tickers específicos y atraigan tráfico orgánico.
 - [ ] **Integración de Anuncios / Afiliación**: Añadir espacios no intrusivos para Google AdSense o banners de afiliados (brokers, plataformas de inversión) para intentar cubrir los costes de servidor.
-- [ ] **CI/CD básico**: Configurar GitHub Actions para que los despliegues a producción se hagan de forma automática y segura tras cada cambio validado en el código.

@@ -91,6 +91,22 @@ gcloud run jobs create daily-narrative-job \
   --service-account "$SA" \
   --update-env-vars "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
 
+# newsletter job: always delete+create to avoid secret/env-var type conflicts
+if gcloud run jobs describe daily-newsletter-job --region "$REGION" --project "$PROJECT_ID" &>/dev/null; then
+  gcloud run jobs delete daily-newsletter-job \
+    --region "$REGION" \
+    --project "$PROJECT_ID" \
+    --quiet
+fi
+gcloud run jobs create daily-newsletter-job \
+  --image "$IMAGE" \
+  --command python \
+  --args "src/jobs/daily_newsletter.py" \
+  --region "$REGION" \
+  --project "$PROJECT_ID" \
+  --service-account "$SA" \
+  --update-env-vars "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
+
 # Remove obsolete job (pointed to daily_picks.py which no longer exists)
 if gcloud run jobs describe daily-scanner-job --region "$REGION" --project "$PROJECT_ID" &>/dev/null; then
   echo "Deleting obsolete daily-scanner-job..."
@@ -117,6 +133,7 @@ declare -A SCHEDULES=(
   ["daily-anomaly-cron"]="daily-anomaly-job|0 7 * * 1-5"
   ["daily-news-cron"]="daily-news-job|0 8 * * 1-5"
   ["daily-narrative-cron"]="daily-narrative-job|0 9 * * 1-5"
+  ["daily-newsletter-cron"]="daily-newsletter-job|30 9 * * 1-5"
   ["weekly-companies-cron"]="weekly-companies|0 10 * * 0"
 )
 
