@@ -2,9 +2,10 @@
 """
 Daily job:
 - Runs sector_opportunities_incremental.bsql against enriched_prices_table
-- Produces up to 10 stock opportunities per sector × 3 setup types:
-    Dip (Bullish Trend)  |  Momentum (Leaders)  |  Value Reversal
-- Each row includes a composite score (0-100) and a human-readable reason
+- Produces up to 3 stock opportunities per (sector, setup_type), hard-capped at 75/day
+- Score floor of 60/100 — rows below that quality are dropped entirely
+- Momentum setup only fires when market breadth (% Bullish in universe) >= 50%
+- Liquidity gate: close × volume > $10M/day
 - DELETE + INSERT on max_date (idempotent)
 - Runs AFTER daily_enrich
 """

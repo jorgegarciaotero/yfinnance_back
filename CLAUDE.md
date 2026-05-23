@@ -32,7 +32,7 @@ Ejecución semanal (domingos): `weekly-companies`
 |--------------|--------|----------|
 | `daily-prices-job` | `src/jobs/daily_prices.py` | OHLCV de Yahoo para ~2700 tickers. MERGE por `(date, symbol)`. |
 | `daily-enrich-job` | `src/jobs/daily_enrich.py` | Indicadores técnicos + fundamentales. Incremental (30d) o full load si >7d desactualizado. |
-| `daily-sector-job` | `src/jobs/daily_sector_opportunities.py` | Top 10 picks × 3 setups por sector. DELETE+INSERT idempotente. |
+| `daily-sector-job` | `src/jobs/daily_sector_opportunities.py` | Top 3 picks × 3 setups por sector, cap global 75/día, score >= 60. Liquidez ≥ $10M/día. Momentum solo si breadth ≥ 50%. DELETE+INSERT idempotente. |
 | `daily-anomaly-job` | `src/jobs/daily_anomaly_radar.py` | Detecta 3 tipos de anomalías. Escanea solo 40d con LAG(). DELETE+INSERT idempotente. |
 | `daily-news-job` | `src/jobs/daily_news_enrich.py` | Yahoo Finance news + Reddit posts para símbolos del día. DELETE+INSERT. |
 | `daily-narrative-job` | `src/jobs/daily_narrative.py` | Llama a Claude Haiku para generar narrativa dealflow por símbolo. MERGE en ambas tablas. |
@@ -58,7 +58,7 @@ Columnas output clave: `symbol`, `sector`, `industry`, `anomaly_type`, `score` (
 
 ### `sector_daily_opportunities` — setups de inversión por sector
 Particionada por `date`, clusterizada por `(sector, setup_type)`.
-Setups: `Dip (Bullish Trend)`, `Momentum (Leaders)`, `Value Reversal`. Top 15 por sector+setup.
+Setups: `Dip (Bullish Trend)`, `Momentum (Leaders)`, `Value Reversal`. Top 3 por sector+setup, cap global 75/día, score floor 60.
 Columnas output clave: `symbol`, `sector`, `setup_type`, `score` (0-100), `rank_in_sector`, `reason`, `company_name`, `company_url`, `company_summary`, `top_news_title`, `top_news_url`, `narrative`.
 
 ### `company_news` — noticias y posts sociales

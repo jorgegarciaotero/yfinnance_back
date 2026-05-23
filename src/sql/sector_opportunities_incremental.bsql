@@ -1,15 +1,14 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- SECTOR DAILY OPPORTUNITIES — INCREMENTAL
+-- SECTOR DAILY OPPORTUNITIES — INCREMENTAL (tightened)
 --
--- For each sector, extracts up to 15 companies in 3 setup categories:
---   1. Dip (Bullish Trend)  — correction within a confirmed uptrend
---   2. Momentum (Leaders)   — sector breakouts with strong momentum
---   3. Value Reversal       — deep corrections with healthy fundamentals
+-- For each sector, extracts up to 3 companies in 3 setup categories:
+--   1. Dip (Bullish Trend)  — controlled correction within a confirmed uptrend
+--   2. Momentum (Leaders)   — only active when market breadth > 50% bullish
+--   3. Value Reversal       — deep correction with positive earnings and signs of stabilisation
 --
--- SCORE (0-100, 4 components × 25pts, varies by category):
---   Dip:            A. RSI oversold  B. SMA200 health  C. Analysts  D. Market cap
---   Momentum:       A. Momentum 10d  B. RSI zone 65    C. Near high  D. Analysts
---   Value Reversal: A. PE quality    B. Upside depth   C. Analysts   D. Market cap
+-- SCORE (0-100, 4 components × 25pts, varies by category).
+-- A row only enters the table if score >= 60.
+-- Output is hard-capped at 75 rows globally by score DESC.
 --
 -- Idempotent: deletes and inserts for max_date of enriched_prices_table.
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -29,15 +28,13 @@ WITH
 -- ── Latest company metadata (most recent weekly snapshot) ─────────────────────
 latest_companies AS (
   SELECT symbol, short_name, business_summary
-  FROM (
-    SELECT symbol, short_name, business_summary,
-           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY updated_at DESC) AS rn
-    FROM `yfinance-gcp.yfinance_raw.companies`
-  )
-  WHERE rn = 1
+  FROM `yfinance-gcp.yfinance_raw.companies`
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY updated_at DESC) = 1
 ),
 
--- ── Base universe ─────────────────────────────────────────────────────────────
+-- ── Base universe with liquidity gate ─────────────────────────────────────────
+-- Defensive dedup: enriched_prices_table is currently producing 4 rows per
+-- (date, symbol) — keep one until the upstream MERGE is fixed.
 base AS (
   SELECT *
   FROM `yfinance-gcp.yfinance_raw.enriched_prices_table`
@@ -45,6 +42,15 @@ base AS (
     AND sector IS NOT NULL AND sector != ''
     AND close > 5
     AND market_cap > 2000000000
+    AND close * volume > 10000000
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date) = 1
+),
+
+-- ── Market regime: bullish if breadth >= 50% of base universe ────────────────
+market_regime AS (
+  SELECT
+    COUNTIF(long_term_trend = 'Bullish') / NULLIF(COUNT(*), 0) AS breadth_bullish_pct
+  FROM base
 ),
 
 -- ── Category 1: Dip on confirmed uptrend ─────────────────────────────────────
@@ -62,24 +68,24 @@ dip AS (
     pe_ratio,
     recommendation_key,
     -- Score (0-100):
-    --   A (25): RSI oversold depth   — RSI 30=25pts, RSI 45=0pts
-    --   B (25): Trend health SMA200  — 0%=0, +20%=25pts
+    --   A (25): RSI oversold depth   — RSI 30=25pts, RSI 40=0pts
+    --   B (25): Trend health SMA200  — +5%=0, +25%=25pts
     --   C (25): Analyst consensus
     --   D (25): Market cap quality   — $2B=0, $50B+=25pts
     ROUND(
-        LEAST(25, GREATEST(0, (45.0 - rsi_14) / 15.0 * 25))
-      + LEAST(25, GREATEST(0, dist_sma_200 / 0.20 * 25))
+        LEAST(25, GREATEST(0, (40.0 - rsi_14) / 10.0 * 25))
+      + LEAST(25, GREATEST(0, (dist_sma_200 - 0.05) / 0.20 * 25))
       + CASE recommendation_key WHEN 'strong_buy' THEN 25 WHEN 'buy' THEN 15 ELSE 5 END
       + LEAST(25, GREATEST(0, (market_cap - 2e9) / 48e9 * 25))
-    , 1) AS score,
-    ROW_NUMBER() OVER (PARTITION BY sector ORDER BY rsi_14 ASC) AS rank_in_sector
+    , 1) AS score
   FROM base
   WHERE long_term_trend = 'Bullish'
-    AND rsi_14 BETWEEN 30 AND 45
-    AND momentum_10d < 0
+    AND rsi_14 BETWEEN 30 AND 40
+    AND dist_sma_200 > 0.05
+    AND momentum_10d BETWEEN -0.10 AND -0.01
 ),
 
--- ── Category 2: Momentum leaders ─────────────────────────────────────────────
+-- ── Category 2: Momentum leaders (only when market regime is bullish) ────────
 momentum AS (
   SELECT
     date, sector, industry, symbol,
@@ -94,24 +100,25 @@ momentum AS (
     pe_ratio,
     recommendation_key,
     -- Score (0-100):
-    --   A (25): Momentum strength    — +2%=0, +15%=25pts
-    --   B (25): RSI sweet spot       — bell curve centered at 65 (strong momentum zone)
-    --   C (25): Near 52w high        — -10%=0pts, -0%=25pts
+    --   A (25): Momentum strength    — +5%=0, +15%=25pts
+    --   B (25): RSI sweet spot       — bell curve centred at 62 (strong momentum zone)
+    --   C (25): Near 52w high        — -7%=0pts, 0%=25pts
     --   D (25): Analyst consensus
     ROUND(
-        LEAST(25, GREATEST(0, (momentum_10d - 0.02) / 0.13 * 25))
-      + LEAST(25, GREATEST(0, 25.0 * (1.0 - POW((rsi_14 - 65.0) / 10.0, 2))))
-      + LEAST(25, GREATEST(0, (pct_from_52w_high + 0.10) / 0.10 * 25))
+        LEAST(25, GREATEST(0, (momentum_10d - 0.05) / 0.10 * 25))
+      + LEAST(25, GREATEST(0, 25.0 * (1.0 - POW((rsi_14 - 62.0) / 8.0, 2))))
+      + LEAST(25, GREATEST(0, (pct_from_52w_high + 0.07) / 0.07 * 25))
       + CASE recommendation_key WHEN 'strong_buy' THEN 25 WHEN 'buy' THEN 15 ELSE 5 END
-    , 1) AS score,
-    ROW_NUMBER() OVER (PARTITION BY sector ORDER BY momentum_10d DESC) AS rank_in_sector
-  FROM base
-  WHERE pct_from_52w_high > -0.10
-    AND rsi_14 BETWEEN 55 AND 75
-    AND momentum_10d > 0.02
+    , 1) AS score
+  FROM base, market_regime
+  WHERE market_regime.breadth_bullish_pct >= 0.50
+    AND long_term_trend = 'Bullish'
+    AND pct_from_52w_high > -0.07
+    AND rsi_14 BETWEEN 55 AND 70
+    AND momentum_10d > 0.05
 ),
 
--- ── Category 3: Value Reversal ────────────────────────────────────────────────
+-- ── Category 3: Value Reversal with stabilisation gate ───────────────────────
 value_rev AS (
   SELECT
     date, sector, industry, symbol,
@@ -126,29 +133,46 @@ value_rev AS (
     pe_ratio,
     recommendation_key,
     -- Score (0-100):
-    --   A (25): PE quality           — PE 20=0pts, PE 5=25pts (already filtered buy/strong_buy)
-    --   B (25): Upside potential     — -30% from high=0, -70%+=25pts
+    --   A (25): PE quality           — PE 18=0, PE 5=25pts
+    --   B (25): Stabilisation        — momentum -5%=0, +3%=25pts (turning up)
     --   C (25): Analyst consensus
     --   D (25): Market cap quality   — $2B=0, $50B+=25pts
     ROUND(
-        LEAST(25, GREATEST(0, (20.0 - pe_ratio) / 15.0 * 25))
-      + LEAST(25, GREATEST(0, (ABS(pct_from_52w_high) - 0.30) / 0.40 * 25))
+        LEAST(25, GREATEST(0, (18.0 - pe_ratio) / 13.0 * 25))
+      + LEAST(25, GREATEST(0, (momentum_10d + 0.05) / 0.08 * 25))
       + CASE recommendation_key WHEN 'strong_buy' THEN 25 WHEN 'buy' THEN 15 ELSE 5 END
       + LEAST(25, GREATEST(0, (market_cap - 2e9) / 48e9 * 25))
-    , 1) AS score,
-    ROW_NUMBER() OVER (PARTITION BY sector ORDER BY pct_from_52w_low ASC) AS rank_in_sector
+    , 1) AS score
   FROM base
-  WHERE pct_from_52w_high < -0.30
-    AND pe_ratio > 0 AND pe_ratio < 20
+  WHERE pct_from_52w_high BETWEEN -0.50 AND -0.30
+    AND pe_ratio > 0 AND pe_ratio < 18
+    AND trailing_eps > 0
+    AND rsi_14 > 35
+    AND momentum_10d > -0.05
     AND recommendation_key IN ('buy', 'strong_buy')
 ),
 
 all_candidates AS (
   SELECT * FROM dip
-  UNION ALL
-  SELECT * FROM momentum
-  UNION ALL
-  SELECT * FROM value_rev
+  UNION ALL SELECT * FROM momentum
+  UNION ALL SELECT * FROM value_rev
+),
+
+-- Quality gate (score >= 60) + Top 3 per (sector, setup) by score DESC
+ranked AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (PARTITION BY sector, setup_type ORDER BY score DESC, symbol) AS rank_in_sector
+  FROM all_candidates
+  WHERE score >= 60
+),
+
+-- Global cap of 75 by score DESC
+capped AS (
+  SELECT *
+  FROM ranked
+  WHERE rank_in_sector <= 3
+  QUALIFY ROW_NUMBER() OVER (ORDER BY score DESC, sector, setup_type, symbol) <= 75
 )
 
 SELECT
@@ -171,7 +195,7 @@ SELECT
   CASE a.setup_type
     WHEN 'Dip (Bullish Trend)' THEN CONCAT(
       'Bullish trend with RSI ', FORMAT('%.0f', a.rsi_14), ' in oversold zone. ',
-      'Momentum ', FORMAT('%.1f', a.momentum_10d_pct), '% in 10d (dip). ',
+      'Momentum ', FORMAT('%.1f', a.momentum_10d_pct), '% in 10d (controlled dip). ',
       FORMAT('%.1f', a.dist_sma200_pct), '% above SMA200. ',
       'Analysts: ', a.recommendation_key, '.'
     )
@@ -183,8 +207,8 @@ SELECT
     )
     WHEN 'Value Reversal' THEN CONCAT(
       FORMAT('%.1f', a.pct_from_52w_high), '% from 52w high (deep correction). ',
-      'PE ratio: ', FORMAT('%.1f', a.pe_ratio), 'x. ',
-      'RSI ', FORMAT('%.0f', a.rsi_14), '. ',
+      'PE ', FORMAT('%.1f', a.pe_ratio), 'x with positive EPS. ',
+      'Stabilising: momentum_10d ', FORMAT('%.1f', a.momentum_10d_pct), '%. ',
       'Analysts: ', a.recommendation_key, '.'
     )
   END AS reason,
@@ -194,7 +218,6 @@ SELECT
   CAST(NULL AS STRING)                                   AS top_news_title,
   CAST(NULL AS STRING)                                   AS top_news_url,
   CAST(NULL AS STRING)                                   AS narrative
-FROM all_candidates a
+FROM capped a
 LEFT JOIN latest_companies c ON c.symbol = a.symbol
-WHERE a.rank_in_sector <= 15
-ORDER BY a.sector, a.setup_type, a.rank_in_sector;
+ORDER BY a.score DESC, a.sector, a.setup_type, a.rank_in_sector;
