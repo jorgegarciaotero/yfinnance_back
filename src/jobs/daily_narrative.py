@@ -14,7 +14,8 @@ import time
 import logging
 from datetime import date
 
-import anthropic
+from google import genai
+from google.genai import types
 from google.cloud import bigquery
 
 from src.config.settings import (
@@ -32,9 +33,10 @@ logger = logging.getLogger("daily_narrative")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-MODEL        = "claude-3-haiku-20240307"     # Ultra-low cost tier
-MAX_NEWS     = 2                              # Reduced context to save input tokens
-CLAUDE_DELAY = 0.3                           # seconds between API calls
+MODEL           = "gemini-2.5-flash"
+VERTEX_LOCATION = "europe-west1"
+MAX_NEWS        = 2     # Reduced context to save input tokens
+LLM_DELAY       = 0.3   # seconds between API calls
 
 SYSTEM_PROMPT = (
     "You are a concise financial analyst writing dealflow notes for institutional investors. "
@@ -70,55 +72,49 @@ def _setup_credentials() -> None:
             os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
 
 
-def get_today_symbols(client: bigquery.Client) -> tuple[dict[str, dict], str]:
+def get_today_symbols(client: bigquery.Client) -> tuple[dict[str, dict], str, str]:
     """
-    Returns ({symbol: {company_name, reason, company_summary, signal_type}}, max_date).
-    Combines anomaly_radar + sector_daily_opportunities.
+    Returns ({symbol: {company_name, reason, company_summary, signal_type}}, max_date_radar, max_date_opps).
+    radar and opps may have different MAX(date); each merge needs its own.
     """
     sql = f"""
     WITH radar AS (
-      SELECT
-        symbol,
-        company_name,
-        company_summary,
-        reason,
-        anomaly_type AS signal_type,
-        CAST(date AS STRING) AS max_date
+      SELECT symbol, company_name, company_summary, reason,
+             anomaly_type AS signal_type, CAST(date AS STRING) AS row_date,
+             'radar' AS src
       FROM `{ANOMALY_RADAR_TABLE}`
       WHERE date = (SELECT MAX(date) FROM `{ANOMALY_RADAR_TABLE}`)
     ),
     opps AS (
-      SELECT
-        symbol,
-        company_name,
-        company_summary,
-        reason,
-        setup_type AS signal_type,
-        CAST(date AS STRING) AS max_date
+      SELECT symbol, company_name, company_summary, reason,
+             setup_type AS signal_type, CAST(date AS STRING) AS row_date,
+             'opps' AS src
       FROM `{SECTOR_OPPORTUNITIES_TABLE}`
       WHERE date = (SELECT MAX(date) FROM `{SECTOR_OPPORTUNITIES_TABLE}`)
     )
-    SELECT * FROM radar
-    UNION DISTINCT
-    SELECT * FROM opps
+    SELECT * FROM radar UNION ALL SELECT * FROM opps
     """
     rows = list(client.query(sql).result())
     if not rows:
-        return {}, ""
+        return {}, "", ""
 
+    max_date_radar = ""
+    max_date_opps = ""
     symbols: dict[str, dict] = {}
-    max_date = rows[0]["max_date"]
     for r in rows:
+        if r["src"] == "radar" and not max_date_radar:
+            max_date_radar = r["row_date"]
+        if r["src"] == "opps" and not max_date_opps:
+            max_date_opps = r["row_date"]
         sym = r["symbol"]
-        if sym not in symbols:          # first occurrence wins (radar takes priority)
+        if sym not in symbols:          # first occurrence wins (radar UNION first)
             symbols[sym] = {
                 "company_name":    r["company_name"] or sym,
                 "company_summary": (r["company_summary"] or "")[:250],
                 "reason":          r["reason"] or "",
                 "signal_type":     r["signal_type"] or "",
-                "max_date":        r["max_date"],
             }
-    return symbols, max_date
+    return symbols, max_date_radar, max_date_opps
 
 
 def get_news_for_symbols(
@@ -176,7 +172,7 @@ def _build_news_block(news_items: list[dict]) -> str:
 
 
 def generate_narrative(
-    anthropic_client: anthropic.Anthropic,
+    llm_client: genai.Client,
     symbol: str,
     data: dict,
     news_items: list[dict],
@@ -194,15 +190,18 @@ def generate_narrative(
         news_block      = news_block,
     )
     try:
-        response = anthropic_client.messages.create(
-            model      = MODEL,
-            max_tokens = 150,
-            system     = SYSTEM_PROMPT,
-            messages   = [{"role": "user", "content": user_msg}],
+        response = llm_client.models.generate_content(
+            model=MODEL,
+            contents=user_msg,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                max_output_tokens=500,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
         )
-        return response.content[0].text.strip()
+        return (response.text or "").strip()
     except Exception as exc:
-        logger.warning("[claude] %s — %s", symbol, exc)
+        logger.warning("[gemini] %s — %s", symbol, exc)
         return ""
 
 
@@ -258,23 +257,20 @@ def main() -> None:
     logger.info("starting daily_narrative")
     _setup_credentials()
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        logger.error("ANTHROPIC_API_KEY env var not set — aborting")
-        return
-
     bq = bigquery.Client(project=PROJECT_ID)
-    ac = anthropic.Anthropic(api_key=api_key)
+    ac = genai.Client(vertexai=True, project=PROJECT_ID, location=VERTEX_LOCATION)
 
-    # 1. Get today's symbols from both output tables
-    symbols_data, max_date = get_today_symbols(bq)
+    # 1. Get today's symbols from both output tables (each may have its own max_date)
+    symbols_data, max_date_radar, max_date_opps = get_today_symbols(bq)
     if not symbols_data:
         logger.info("no symbols found for today — skipping")
         return
-    logger.info("found %d unique symbols for %s", len(symbols_data), max_date)
+    logger.info("found %d unique symbols (radar=%s, opps=%s)",
+                len(symbols_data), max_date_radar, max_date_opps)
 
-    # 2. Fetch all news in a single query
-    news_by_symbol = get_news_for_symbols(bq, list(symbols_data.keys()), max_date)
+    # 2. Fetch news using the most recent date between both tables
+    news_date = max(d for d in (max_date_radar, max_date_opps) if d)
+    news_by_symbol = get_news_for_symbols(bq, list(symbols_data.keys()), news_date)
     logger.info("news available for %d/%d symbols", len(news_by_symbol), len(symbols_data))
 
     # 3. Generate narratives
@@ -295,12 +291,14 @@ def main() -> None:
             "narrative":      narrative,
         })
 
-        if CLAUDE_DELAY:
-            time.sleep(CLAUDE_DELAY)
+        if LLM_DELAY:
+            time.sleep(LLM_DELAY)
 
-    # 4. Merge into both tables
-    merge_narratives(bq, ANOMALY_RADAR_TABLE,        narratives, max_date)
-    merge_narratives(bq, SECTOR_OPPORTUNITIES_TABLE, narratives, max_date)
+    # 4. Merge into each table with its own max_date
+    if max_date_radar:
+        merge_narratives(bq, ANOMALY_RADAR_TABLE, narratives, max_date_radar)
+    if max_date_opps:
+        merge_narratives(bq, SECTOR_OPPORTUNITIES_TABLE, narratives, max_date_opps)
 
     logger.info("daily_narrative finished — %d narratives written", len(narratives))
 

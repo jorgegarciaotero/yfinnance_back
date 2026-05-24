@@ -30,7 +30,7 @@ Para que la información sea realmente valiosa y no depender de una sola fuente,
 >   "smart_money_signals": "Resumen en 1 frase sobre flujos institucionales, engaños de mercado o liquidez.",
 >   "key_levels": [{"activo": "SP500", "soporte": 5100, "resistencia": 5200}],
 >   "activos_mencionados": ["SP500", "Oro", "NVDA"],
->   "tesis_principal": "Resumen ejecutivo de alto valor en máximo 2 frases."
+>   "tesis_principal": "Resumen profundo y detallado de la tesis principal (3 a 5 frases), explicando el por qué de su visión y su contexto."
 > }
 
 ---

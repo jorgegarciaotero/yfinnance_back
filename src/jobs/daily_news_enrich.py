@@ -1,21 +1,17 @@
 # src/jobs/daily_news_enrich.py
 """
-Daily job: News & Social Media Enrichment
+Daily job: News Enrichment
 - Queries today's unique symbols from anomaly_radar + sector_daily_opportunities
-- Fetches recent mentions from two free sources:
-    1. Yahoo Finance news  — via yfinance (no API key)
-    2. Reddit              — public JSON API, r/stocks + r/investing + r/wallstreetbets (no API key)
-- Stores up to 5 items per symbol per source in company_news table
+- Fetches recent Yahoo Finance news per symbol via yfinance (no API key)
+- Stores up to 5 items per symbol in company_news table
 - DELETE + INSERT on max_date (idempotent)
 - Runs AFTER daily_anomaly and daily_sector jobs
 """
 
 import os
-import time
 import logging
 from datetime import datetime, timezone
 
-import requests
 import yfinance as yf
 from google.cloud import bigquery
 
@@ -32,22 +28,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("daily_news_enrich")
 
-REDDIT_HEADERS = {"User-Agent": "yfinnance-news-bot/1.0 (educational project)"}
-REDDIT_URL = "https://www.reddit.com/r/stocks+investing+wallstreetbets/search.json"
 MAX_ITEMS_PER_SOURCE = 5
-REDDIT_DELAY_SECS = 1.2   # stay well within Reddit's 60 req/min public limit
 
 SCHEMA = [
     bigquery.SchemaField("date",         "DATE",      mode="REQUIRED"),
     bigquery.SchemaField("symbol",       "STRING",    mode="REQUIRED"),
-    bigquery.SchemaField("source",       "STRING",    mode="REQUIRED"),  # yahoo_finance | reddit
+    bigquery.SchemaField("source",       "STRING",    mode="REQUIRED"),  # yahoo_finance
     bigquery.SchemaField("title",        "STRING"),
     bigquery.SchemaField("url",          "STRING"),
     bigquery.SchemaField("published_at", "TIMESTAMP"),
     bigquery.SchemaField("summary",      "STRING"),
-    bigquery.SchemaField("score",        "INT64"),        # Reddit upvotes; NULL for Yahoo
-    bigquery.SchemaField("num_comments", "INT64"),        # Reddit comments; NULL for Yahoo
-    bigquery.SchemaField("publisher",    "STRING"),       # Yahoo publisher; subreddit for Reddit
+    bigquery.SchemaField("score",        "INT64"),        # legacy Reddit column, kept for BQ compatibility
+    bigquery.SchemaField("num_comments", "INT64"),        # legacy Reddit column, kept for BQ compatibility
+    bigquery.SchemaField("publisher",    "STRING"),       # Yahoo publisher
 ]
 
 
@@ -159,57 +152,6 @@ def fetch_yahoo_news(symbol: str, max_date: str) -> list[dict]:
     return rows
 
 
-# ── Reddit public API ─────────────────────────────────────────────────────────
-
-def fetch_reddit_posts(symbol: str, max_date: str) -> list[dict]:
-    rows = []
-    try:
-        resp = requests.get(
-            REDDIT_URL,
-            headers=REDDIT_HEADERS,
-            params={
-                "q":           symbol,
-                "sort":        "top",
-                "t":           "week",
-                "limit":       MAX_ITEMS_PER_SOURCE,
-                "restrict_sr": True,
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        children = resp.json().get("data", {}).get("children", [])
-        for child in children:
-            post = child.get("data", {})
-            title = post.get("title", "")
-            if not title:
-                continue
-
-            permalink = post.get("permalink", "")
-            url = f"https://www.reddit.com{permalink}" if permalink else post.get("url", "")
-            selftext = post.get("selftext", "") or ""
-            summary = selftext[:600] if selftext and selftext != "[removed]" else None
-            published_at = None
-            ts = post.get("created_utc")
-            if ts:
-                published_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-
-            rows.append({
-                "date":         max_date,
-                "symbol":       symbol,
-                "source":       "reddit",
-                "title":        title,
-                "url":          url,
-                "published_at": published_at,
-                "summary":      summary,
-                "score":        post.get("score"),
-                "num_comments": post.get("num_comments"),
-                "publisher":    post.get("subreddit_name_prefixed") or post.get("subreddit"),
-            })
-    except Exception as exc:
-        logger.warning("[reddit] %s — %s", symbol, exc)
-    return rows
-
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -243,9 +185,6 @@ def main() -> None:
         logger.info("[%d/%d] fetching news for %s", i + 1, len(symbols), symbol)
 
         all_rows.extend(fetch_yahoo_news(symbol, max_date))
-
-        all_rows.extend(fetch_reddit_posts(symbol, max_date))
-        time.sleep(REDDIT_DELAY_SECS)
 
         # flush every 20 symbols to avoid huge in-memory batches
         if len(all_rows) >= 200:

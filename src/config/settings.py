@@ -14,6 +14,7 @@ ENRICHED_PRICES_TABLE = f"{PROJECT_ID}.{DATASET}.enriched_prices_table"
 SECTOR_OPPORTUNITIES_TABLE = f"{PROJECT_ID}.{DATASET}.sector_daily_opportunities"
 ANOMALY_RADAR_TABLE        = f"{PROJECT_ID}.{DATASET}.anomaly_radar"
 COMPANY_NEWS_TABLE         = f"{PROJECT_ID}.{DATASET}.company_news"
+MARKET_INSIGHTS_TABLE      = f"{PROJECT_ID}.{DATASET}.market_insights"
 
 # ─────────────────────────────────────────────
 # Yahoo Finance

@@ -142,13 +142,13 @@ ORDER BY source_type, source_name
 | `source_type` | STRING | `"youtube"` \| `"rss"` |
 | `source_name` | STRING | Canal (ej. "Bolsacava", "The Macro Compass") |
 | `title` | STRING | Título original del vídeo o resumen de noticias |
-| `url` | STRING | Enlace al vídeo o al feed original |
+| `url` | STRING | Enlace al vídeo o al feed original (usar para botón "Ir a la fuente") |
 | `market_bias` | STRING | Sesgo general: `"Bullish"`, `"Bearish"`, `"Neutral"`, `"N/A"` |
 | `macro_event` | STRING | Evento clave mencionado (ej. "Dato del IPC") |
 | `smart_money_signals` | STRING | Resumen de 1 frase sobre engaños o liquidez |
 | `key_levels` | STRING | Array JSON serializado (ej. `[{"activo": "SP500", "soporte": 5100}]`) |
 | `mentioned_tickers` | STRING | Activos mencionados separados por comas (ej. "SP500,ORO,NVDA") |
-| `tesis_principal` | STRING | Resumen ejecutivo del vídeo en 2 frases |
+| `tesis_principal` | STRING | Resumen detallado de la tesis principal (3 a 5 frases) |
 
 ---
 
