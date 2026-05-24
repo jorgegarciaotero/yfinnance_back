@@ -207,11 +207,6 @@ def generate_narrative(
 
 # ── BigQuery MERGE ────────────────────────────────────────────────────────────
 
-def _escape(s: str) -> str:
-    """Escape single quotes for BigQuery string literals."""
-    return s.replace("\\", "\\\\").replace("'", "\\'")
-
-
 def merge_narratives(
     client: bigquery.Client,
     table: str,
@@ -220,33 +215,45 @@ def merge_narratives(
 ) -> None:
     """
     Merges narrative columns into the target table for max_date.
-    Uses UNNEST + STRUCT to avoid temp tables.
+    Uses parameterised query (ARRAY<STRUCT>) to avoid SQL-injection / escaping bugs.
     """
     if not narratives:
         return
 
-    struct_rows = []
-    for n in narratives:
-        struct_rows.append(
-            f"STRUCT("
-            f"'{_escape(n['symbol'])}' AS symbol, "
-            f"'{_escape(n['top_news_title'])}' AS top_news_title, "
-            f"'{_escape(n['top_news_url'])}' AS top_news_url, "
-            f"'{_escape(n['narrative'])}' AS narrative"
-            f")"
+    struct_type = bigquery.StructQueryParameterType(
+        bigquery.ScalarQueryParameterType("STRING", name="symbol"),
+        bigquery.ScalarQueryParameterType("STRING", name="top_news_title"),
+        bigquery.ScalarQueryParameterType("STRING", name="top_news_url"),
+        bigquery.ScalarQueryParameterType("STRING", name="narrative"),
+    )
+    rows = [
+        bigquery.StructQueryParameter(
+            None,
+            bigquery.ScalarQueryParameter("symbol",         "STRING", n["symbol"]),
+            bigquery.ScalarQueryParameter("top_news_title", "STRING", n["top_news_title"] or ""),
+            bigquery.ScalarQueryParameter("top_news_url",   "STRING", n["top_news_url"] or ""),
+            bigquery.ScalarQueryParameter("narrative",      "STRING", n["narrative"] or ""),
         )
-
-    structs = ", ".join(struct_rows)
+        for n in narratives
+    ]
     sql = f"""
     MERGE `{table}` T
-    USING (SELECT * FROM UNNEST([{structs}])) S
-      ON T.date = '{max_date}' AND T.symbol = S.symbol
+    USING UNNEST(@narratives) S
+      ON T.date = @max_date AND T.symbol = S.symbol
     WHEN MATCHED THEN UPDATE SET
       T.top_news_title = S.top_news_title,
       T.top_news_url   = S.top_news_url,
       T.narrative      = S.narrative
     """
-    job = client.query(sql)
+    job = client.query(
+        sql,
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ArrayQueryParameter("narratives", struct_type, rows),
+                bigquery.ScalarQueryParameter("max_date", "DATE", max_date),
+            ],
+        ),
+    )
     job.result()
     logger.info("merged narratives into %s (%d rows)", table, len(narratives))
 
