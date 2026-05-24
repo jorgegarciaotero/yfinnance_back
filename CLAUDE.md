@@ -14,7 +14,7 @@ El objetivo es producir señales diarias curadas (no ruido) para un frontend edu
 | Almacenamiento | GCS bucket `yfinance-cache` |
 | Datos de mercado | `yfinance` (Yahoo Finance, sin API key) |
 | Fuentes sociales | Reddit public JSON API (sin API key) |
-| Narrativas LLM | Anthropic Claude Haiku (`claude-haiku-4-5-20251001`) |
+| Narrativas LLM | Gemini 2.5 Flash (`gemini-2.5-flash` vía Vertex AI) |
 | Runtime | Python 3.13, imagen Docker en Artifact Registry |
 
 ---
@@ -32,10 +32,10 @@ Ejecución semanal (domingos): `weekly-companies`
 |--------------|--------|----------|
 | `daily-prices-job` | `src/jobs/daily_prices.py` | OHLCV de Yahoo para ~2700 tickers. MERGE por `(date, symbol)`. |
 | `daily-enrich-job` | `src/jobs/daily_enrich.py` | Indicadores técnicos + fundamentales. Incremental (30d) o full load si >7d desactualizado. |
-| `daily-sector-job` | `src/jobs/daily_sector_opportunities.py` | Top 3 picks × 3 setups por sector, cap global 75/día, score >= 60. Liquidez ≥ $10M/día. Momentum solo si breadth ≥ 50%. DELETE+INSERT idempotente. |
+| `daily-sector-job` | `src/jobs/daily_sector_opportunities.py` | Top 10 picks × 3 setups por sector. DELETE+INSERT idempotente. |
 | `daily-anomaly-job` | `src/jobs/daily_anomaly_radar.py` | Detecta 3 tipos de anomalías. Escanea solo 40d con LAG(). DELETE+INSERT idempotente. |
 | `daily-news-job` | `src/jobs/daily_news_enrich.py` | Yahoo Finance news + Reddit posts para símbolos del día. DELETE+INSERT. |
-| `daily-narrative-job` | `src/jobs/daily_narrative.py` | Llama a Claude Haiku para generar narrativa dealflow por símbolo. MERGE en ambas tablas. |
+| `daily-narrative-job` | `src/jobs/daily_narrative.py` | Llama a Gemini 2.5 Flash para generar narrativa dealflow por símbolo. MERGE en ambas tablas. |
 | `weekly-companies` | `src/jobs/weekly_companies.py` | Refresca universo de empresas (S&P500, Russell 2000, STOXX 600, commodities, bonos). |
 
 ---
@@ -58,7 +58,7 @@ Columnas output clave: `symbol`, `sector`, `industry`, `anomaly_type`, `score` (
 
 ### `sector_daily_opportunities` — setups de inversión por sector
 Particionada por `date`, clusterizada por `(sector, setup_type)`.
-Setups: `Dip (Bullish Trend)`, `Momentum (Leaders)`, `Value Reversal`. Top 3 por sector+setup, cap global 75/día, score floor 60.
+Setups: `Dip (Bullish Trend)`, `Momentum (Leaders)`, `Value Reversal`. Top 15 por sector+setup.
 Columnas output clave: `symbol`, `sector`, `setup_type`, `score` (0-100), `rank_in_sector`, `reason`, `company_name`, `company_url`, `company_summary`, `top_news_title`, `top_news_url`, `narrative`.
 
 ### `company_news` — noticias y posts sociales
@@ -143,7 +143,6 @@ fi
 - **Región**: `europe-west1`
 - **Service Account**: `425504558294-compute@developer.gserviceaccount.com`
 - **Imagen Docker**: `europe-west1-docker.pkg.dev/yfinance-gcp/stock-jobs/stock-jobs:latest`
-- **Secret Manager**: `anthropic-api-key` (para Claude Haiku en `daily-narrative-job`)
 - **Credenciales locales**: `src/config/service-account.json` (gitignoreado)
 
 ---
@@ -174,6 +173,6 @@ fi
 ## Costes y restricciones
 
 - BigQuery: **nunca** hacer full scan de `enriched_prices_table` (~13M filas). Siempre filtrar por `date` o usar ventanas limitadas (40d para anomaly radar).
-- Claude API: **solo** llamar para símbolos ya seleccionados por radar/oportunidades (~50-150/día). Usar Haiku, no Sonnet/Opus.
+- Vertex AI Gemini: **solo** llamar para símbolos ya seleccionados por radar/oportunidades (~50-150/día). Usar Gemini 2.5 Flash.
 - Reddit: respetar delay de 1.2s entre requests (límite público 60 req/min).
 - El frontend **nunca** debe consultar tablas raw — solo tablas de resultados pre-calculados.

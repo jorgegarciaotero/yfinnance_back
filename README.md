@@ -14,6 +14,8 @@ Yahoo Finance (yfinance)
                                  (enrich_prices.bsql)                              (prices + technical indicators)
                                                                                             │
                                                                               daily_sector_opportunities
+                                                                                            │
+          daily_newsletter   ──► market_insights (Macro AI summaries)
                                                                               (sector_opportunities_incremental.bsql)
                                                                                             │
                                                                                  sector_daily_opportunities

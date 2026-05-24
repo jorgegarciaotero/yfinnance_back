@@ -12,6 +12,7 @@ import json
 import logging
 import urllib.request
 import xml.etree.ElementTree as ET
+import re
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 import feedparser
@@ -82,8 +83,8 @@ CHANNELS = [
 
 RSS_FEEDS = [
     {"id": "https://www.cnbc.com/id/20910258/device/rss/rss.html",                       "name": "CNBC Economy",        "profile": "Foco en indicadores económicos globales, inflación y bancos centrales."},
-    {"id": "https://feeds.content.dowjones.io/public/rss/socialeconomyfeed",             "name": "WSJ Economy",         "profile": "Análisis profundo de política monetaria, mercados laborales y geopolítica económica."},
-    {"id": "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",                "name": "MarketWatch Markets", "profile": "Pulso diario de mercados: renta variable, materias primas, divisas y bonos."},
+    {"id": "https://finance.yahoo.com/news/rssindex",                                    "name": "Yahoo Finance Top",   "profile": "Foco en las noticias financieras más importantes del día, mercados globales y macroeconomía."},
+    {"id": "https://www.cnbc.com/id/10000664/device/rss/rss.html",                       "name": "CNBC Finance",        "profile": "Foco en mercados de renta variable, renta fija y flujos de capital institucional."},
 ]
 
 class GlobalMarketAnalyzer:
@@ -118,13 +119,18 @@ class GlobalMarketAnalyzer:
             with urllib.request.urlopen(req) as response:
                 xml_data = response.read()
             root = ET.fromstring(xml_data)
-            ns = {'atom': 'http://www.w3.org/2005/Atom', 'yt': 'http://www.youtube.com/xml/schemas/2015'}
+            ns = {'atom': 'http://www.w3.org/2005/Atom', 'yt': 'http://www.youtube.com/xml/schemas/2015', 'media': 'http://search.yahoo.com/mrss/'}
             entry = root.find('atom:entry', ns)
             if entry is not None:
-                return (entry.find('yt:videoId', ns).text, entry.find('atom:title', ns).text, entry.find('atom:published', ns).text)
+                video_id = entry.find('yt:videoId', ns).text
+                title = entry.find('atom:title', ns).text
+                published = entry.find('atom:published', ns).text
+                desc_node = entry.find('.//media:description', ns)
+                description = desc_node.text if desc_node is not None else ""
+                return video_id, title, published, description
         except Exception as e:
             logger.error(f"Error leyendo RSS del canal {channel_id}: {e}")
-        return None, None, None
+        return None, None, None, None
 
     _yt_api = YouTubeTranscriptApi()
 
@@ -134,15 +140,43 @@ class GlobalMarketAnalyzer:
             return " ".join(snippet.text for snippet in fetched.snippets)
         except Exception as e:
             logger.warning(f"transcript fail for {video_id}: {e}")
+            logger.info("Bloqueo de YouTube detectado. Usando servicio de respaldo (youtubetranscript.com)...")
+            return self._get_transcript_fallback(video_id)
+
+    def _get_transcript_fallback(self, video_id: str) -> str:
+        url = f"https://youtubetranscript.com/?server_vid2={video_id}"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                xml_data = response.read()
+            
+            root = ET.fromstring(xml_data)
+            if root.tag == 'error':
+                logger.error(f"Error en servicio de respaldo: {root.text}")
+                return ""
+                
+            return " ".join(child.text for child in root if child.text)
+        except Exception as e:
+            logger.error(f"El servicio de respaldo falló para {video_id}: {e}")
             return ""
 
     def analyze_video(self, channel: dict) -> dict:
-        video_id, title, published_str = self._get_latest_video_rss(channel["id"])
+        video_id, title, published_str, description = self._get_latest_video_rss(channel["id"])
         if not video_id: return None
 
         logger.info(f"Analizando último vídeo de {channel['name']}: {title}")
         transcript = self._get_transcript(video_id)
-        if not transcript or not self.client: return None
+        
+        # Plan C: Si no hay transcripción, usamos la descripción oficial del vídeo.
+        if not transcript or len(transcript) < 200: 
+            if description and len(description) > 50:
+                logger.info("Sin transcripción. Usando la descripción oficial del vídeo como respaldo.")
+                transcript = f"RESUMEN DEL AUTOR EN LA DESCRIPCIÓN DEL VÍDEO:\n{description}"
+            else:
+                logger.warning(f"Transcripción vacía y sin descripción útil para {title}. Se omite.")
+                return None
+
+        if not self.client: return None
 
         system_prompt = self.SYSTEM_PROMPT_TEMPLATE.format(source_name=channel["name"], source_profile=channel["profile"])
 
@@ -178,8 +212,16 @@ class GlobalMarketAnalyzer:
             return None
 
         combined_text = ""
-        for i, entry in enumerate(parsed.entries[:3]):
-            combined_text += f"Noticia {i+1}: {entry.get('title', '')}\nResumen: {entry.get('summary', '')}\n\n"
+        # Extraemos hasta 15 titulares y resúmenes directamente del RSS (esquiva todos los paywalls)
+        for i, entry in enumerate(parsed.entries[:15]):
+            title = entry.get('title', '')
+            summary = entry.get('summary', '')
+            
+            # Limpiamos posibles etiquetas HTML incrustadas en el RSS
+            summary = re.sub(r'<[^>]+>', ' ', summary)
+            summary = re.sub(r'\s+', ' ', summary).strip()
+            
+            combined_text += f"Noticia {i+1}: {title}\nResumen:\n{summary}\n\n"
 
         if not combined_text or not self.client: return None
 
@@ -188,7 +230,7 @@ class GlobalMarketAnalyzer:
         try:
             response = self.client.models.generate_content(
                 model=self.MODEL_NAME,
-                contents=f"Titulares y resúmenes:\n\n{combined_text[:10000]}",
+                contents=f"Textos completos de noticias:\n\n{combined_text[:25000]}",
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     max_output_tokens=2048,

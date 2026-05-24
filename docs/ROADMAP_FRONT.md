@@ -11,6 +11,7 @@ Este documento refleja el estado de la interfaz de usuario, visualización de da
 - `/api/picks`: Oportunidades por Setup (Dip, Momentum, Value Reversal). **Incluye: `narrative`, `top_news_title`, `top_news_url`.**
 - `/api/radar`: Motor de anomalías (Spike, Sobrevendido, Inercia). **Incluye: `narrative`, `top_news_title`, `top_news_url`.**
 - `/api/stock/{symbol}`: Histórico 260d OHLCV + Indicadores Técnicos + Fundamentales.
+- `/api/insights`: Termómetro de mercado diario (Resúmenes de YouTube y RSS Macro).
 
 ---
 
@@ -22,7 +23,7 @@ Este documento refleja el estado de la interfaz de usuario, visualización de da
 - [x] **Sección "Macro & Materias Primas"**: Semáforo visual de la economía con gráficos de Bonos y Commodities.
 - [x] **Refinamiento UI/UX**: Unificación de estilo oscuro en componentes de filtrado, traducción al inglés de tipos de anomalías en la vista y limpieza visual de tablas usando texto semántico en color para evitar fatiga visual.
 - [ ] **Integración de Narrativas (Dealflow)**: Incorporar en Radar y Dashboard los resúmenes LLM de mercado y noticias (`narrative` y `top_news_title`). *(DESBLOQUEADO: Fase 4 del Back-end completada)*.
-- [ ] **Sección "Newsletter / Insights"**: UI para leer resúmenes macro diarios (YouTube, noticias) como un reporte financiero. *(BLOQUEADO: Esperando Fase 4.5 del Back-end)*.
+- [ ] **Sección "Morning Briefing / Insights"**: Dashboard con el Termómetro de Mercado general (Bullish/Bearish), nube de activos mencionados y resúmenes diarios curados de YouTube y noticias. *(DESBLOQUEADO: Fase 4.5 del Back-end completada)*.
 
 ---
 

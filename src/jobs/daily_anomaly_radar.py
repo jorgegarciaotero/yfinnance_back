@@ -47,6 +47,7 @@ SCHEMA = [
     bigquery.SchemaField("rank_in_sector",  "INT64"),
     bigquery.SchemaField("reason",          "STRING"),
     bigquery.SchemaField("company_name",    "STRING"),
+    bigquery.SchemaField("cap_category",    "STRING"),
     bigquery.SchemaField("company_url",     "STRING"),
     bigquery.SchemaField("company_summary", "STRING"),
     bigquery.SchemaField("top_news_title",  "STRING"),

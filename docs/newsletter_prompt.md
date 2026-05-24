@@ -13,7 +13,7 @@ Para que la información sea realmente valiosa y no depender de una sola fuente,
 
 ---
 
-## 2. Prompt Maestro Global (Claude 3 Haiku)
+## 2. Prompt Maestro Global (Gemini 2.5 Flash)
 
 *Instrucción base para pasarle al LLM junto con la transcripción del vídeo, noticia o hilo de Twitter.*
 
@@ -67,7 +67,7 @@ El objetivo es crear un endpoint `/api/market-thermometer` que haga una agregaci
 ---
 
 ## Notas de Implementación
-*   **LLM:** Seguimos usando **Claude 3 Haiku** a través de la API de Anthropic. Al ser un modelo de última generación, es multilingüe nativo. Traduce, resume y estructura en JSON en una sola pasada de forma ultrarrápida.
+*   **LLM:** Pasamos a usar **Gemini 2.5 Flash** a través de la API de Vertex AI. Al ser un modelo ultrarrápido y multimodal nativo, resume y estructura en JSON devolviendo los datos perfectos para BigQuery, sin coste de API externa usando las cuotas de Google Cloud.
 *   **YouTube:** RSS para detectar vídeos nuevos + `youtube-transcript-api` (priorizando `['es', 'en']`).
 *   **Noticias Web:** Librería `feedparser` de Python para leer feeds RSS (ej. Yahoo Finance RSS) a coste $0.
 *   **Reddit:** Ya implementado en Fase 4 vía su JSON API pública (`.json` appended a las URLs).

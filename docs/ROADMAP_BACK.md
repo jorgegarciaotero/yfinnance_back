@@ -53,7 +53,7 @@ Para el estado de la interfaz de usuario y visualización, consulta `ROADMAP_FRO
 
 - [x] **Fuentes de noticias**: Yahoo Finance news (vía yfinance) y Reddit (r/stocks, r/investing, r/wallstreetbets) sin API key. Almacenadas en tabla `company_news`. Job: `daily-news-job`.
 - [x] **Columnas de narrativa**: `top_news_title`, `top_news_url` y `narrative` añadidas a `anomaly_radar` y `sector_daily_opportunities`.
-- [x] **Resúmenes con LLMs**: Job `daily-narrative-job` desplegado en Cloud Run. Llama a Claude Haiku únicamente para los símbolos seleccionados por el radar (~50-150/día). Genera narrativa de 3 frases estilo *Dealflow*: catalizador → evidencia → outlook. Coste estimado <0.01 USD/día.
+- [x] **Resúmenes con LLMs**: Job `daily-narrative-job` desplegado en Cloud Run. Llama a Gemini 2.5 Flash únicamente para los símbolos seleccionados por el radar (~50-150/día). Genera narrativa de 3 frases estilo *Dealflow*: catalizador → evidencia → outlook. Coste estimado <0.01 USD/día.
 - [ ] **Fuentes adicionales pendientes** (mejora futura):
     - Substack & Newsletters financieras vía RSS.
     - FinTwit / X (si la API resulta viable económicamente).
@@ -66,7 +66,7 @@ Para el estado de la interfaz de usuario y visualización, consulta `ROADMAP_FRO
 - [x] **Tabla BigQuery `market_insights`**: Crear tabla para almacenar los análisis estructurados (bias, tesis, niveles clave) de cada fuente.
 - [x] **Ingesta de YouTube (`youtube-transcript-api`)**: Extraer subtítulos de los últimos vídeos de una lista curada de canales de YouTube financieros sin usar API Keys que limiten por cuota.
 - [x] **Ingesta de Noticias Macro (RSS)**: Leer feeds RSS públicos gratuitos (CNBC, Yahoo Finance Macro, Substacks seleccionados) usando la librería `feedparser`.
-- [x] **Resumen con LLM (Claude Haiku)**: Nuevo Cloud Run Job (`daily-newsletter-job`) que procese las transcripciones y las noticias del día para generar resúmenes ejecutivos ("Qué ha pasado hoy en el mercado").
+- [x] **Resumen con LLM (Gemini 2.5 Flash)**: Nuevo Cloud Run Job (`daily-newsletter-job`) que procese las transcripciones y las noticias del día para generar resúmenes ejecutivos ("Qué ha pasado hoy en el mercado").
 
 ---
 

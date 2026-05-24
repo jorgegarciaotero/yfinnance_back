@@ -30,7 +30,10 @@ def _get_sp500() -> pd.Series:
         "?fileType=csv&fileName=IVV_holdings&dataType=fund"
     )
     df = _load_csv(url, skiprows=9).iloc[:-2]
-    return df["Ticker"]
+    
+    if "Symbol" in df.columns: return df["Symbol"]
+    if "Ticker" in df.columns: return df["Ticker"]
+    return df.iloc[:, 0]
 
 
 def _get_russell_2000() -> pd.Series:
@@ -40,7 +43,10 @@ def _get_russell_2000() -> pd.Series:
         "?fileType=csv&fileName=IWM_holdings&dataType=fund"
     )
     df = _load_csv(url, skiprows=9).iloc[:-2]
-    return df["Ticker"]
+    
+    if "Symbol" in df.columns: return df["Symbol"]
+    if "Ticker" in df.columns: return df["Ticker"]
+    return df.iloc[:, 0]
 
 
 def _get_stoxx_600() -> pd.Series:
@@ -49,7 +55,11 @@ def _get_stoxx_600() -> pd.Series:
         "STOXXSelectionList/2025/April/slpublic_sxxp_20250401.csv"
     )
     df = _load_csv(url, sep=";").iloc[:600]
-    return df["RIC"]
+    
+    if "RIC" in df.columns: return df["RIC"]
+    if "Symbol" in df.columns: return df["Symbol"]
+    if "Ticker" in df.columns: return df["Ticker"]
+    return df.iloc[:, 0]
 
 
 def _get_commodities_etfs() -> list:
@@ -115,4 +125,3 @@ def enrich_with_yahoo_status(df: pd.DataFrame) -> pd.DataFrame:
             df.at[idx, "is_active"] = False
 
     return df
-
