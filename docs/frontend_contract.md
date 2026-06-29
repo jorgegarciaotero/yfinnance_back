@@ -93,6 +93,8 @@ ORDER BY sector, setup_type, rank_in_sector
 | `top_news_title` | STRING | Titular de la noticia más relevante |
 | `top_news_url` | STRING | Enlace a la noticia |
 | `narrative` | STRING | Narrativa dealflow 3 frases (IA) |
+| `performance_1w_pct` | FLOAT | Rendimiento a 1 semana de haberse detectado la oportunidad |
+| `performance_1m_pct` | FLOAT | Rendimiento a 1 mes de haberse detectado la oportunidad |
 
 ---
 
@@ -330,6 +332,8 @@ export interface SectorOpportunityItem {
   top_news_title: string | null
   top_news_url: string | null
   narrative: string | null
+  performance_1w_pct: number | null
+  performance_1m_pct: number | null
 }
 
 export interface CompanyNewsItem {

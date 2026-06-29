@@ -85,8 +85,16 @@ def run_sql(client: bigquery.Client, target_date: str | None = None) -> None:
         logger.info("backfill mode: target_date=%s", target_date)
     logger.info("running anomaly_radar query...")
     job = client.query(sql)
-    job.result()
-    logger.info("anomaly_radar job completed (job_id=%s)", job.job_id)
+    
+    try:
+        job.result()
+        logger.info("anomaly_radar job completed (job_id=%s)", job.job_id)
+    except Exception as e:
+        logger.error("BigQuery job failed: %s", e)
+        if getattr(job, "errors", None):
+            logger.error("Job errors: %s", job.errors)
+        # Forzamos que el Traceback final muestre el error exacto del SQL
+        raise RuntimeError(f"BigQuery SQL Error: {getattr(job, 'errors', e)}") from e
 
 
 def main() -> None:

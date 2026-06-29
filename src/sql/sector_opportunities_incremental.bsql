@@ -43,6 +43,8 @@ base AS (
     AND close > 5
     AND market_cap > 2000000000
     AND close * volume > 10000000
+    AND dist_sma_200 > -0.05 -- Exclude broken stocks
+    AND trailing_eps > 0     -- Must be profitable
   QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date) = 1
 ),
 

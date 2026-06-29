@@ -20,6 +20,7 @@ from src.config.settings import (
     PROJECT_ID,
     DATASET,
     SECTOR_OPPORTUNITIES_TABLE,
+    DAILY_PRICES_TABLE,
 )
 
 logging.basicConfig(
@@ -54,6 +55,8 @@ SCHEMA = [
     bigquery.SchemaField("top_news_title",     "STRING"),
     bigquery.SchemaField("top_news_url",       "STRING"),
     bigquery.SchemaField("narrative",          "STRING"),
+    bigquery.SchemaField("performance_1w_pct", "FLOAT64"),
+    bigquery.SchemaField("performance_1m_pct", "FLOAT64"),
 ]
 
 
@@ -86,8 +89,60 @@ def run_sql(client: bigquery.Client, target_date: str | None = None) -> None:
         logger.info("backfill mode: target_date=%s", target_date)
     logger.info("running sector_opportunities query...")
     job = client.query(sql)
-    job.result()
-    logger.info("sector_opportunities job completed (job_id=%s)", job.job_id)
+    
+    try:
+        job.result()
+        logger.info("sector_opportunities job completed (job_id=%s)", job.job_id)
+    except Exception as e:
+        logger.error("BigQuery job failed: %s", e)
+        if getattr(job, "errors", None):
+            logger.error("Job errors: %s", job.errors)
+        raise
+
+def update_forward_performance(client: bigquery.Client) -> None:
+    logger.info("updating forward performance (1w, 1m) for past opportunities...")
+    # Utilizamos ventanas estrechas (BETWEEN) para no escanear toda la historia y ahorrar costes
+    sql = f"""
+    MERGE `{SECTOR_OPPORTUNITIES_TABLE}` O
+    USING (
+      SELECT 
+        date AS opp_date,
+        symbol,
+        close AS opp_close,
+        (
+          SELECT P.close
+          FROM `{DAILY_PRICES_TABLE}` P
+          WHERE P.symbol = O.symbol 
+            AND P.date >= DATE_ADD(O.date, INTERVAL 7 DAY)
+            AND P.date <= DATE_ADD(O.date, INTERVAL 14 DAY)
+          ORDER BY P.date ASC
+          LIMIT 1
+        ) AS close_1w,
+        (
+          SELECT P.close
+          FROM `{DAILY_PRICES_TABLE}` P
+          WHERE P.symbol = O.symbol 
+            AND P.date >= DATE_ADD(O.date, INTERVAL 30 DAY)
+            AND P.date <= DATE_ADD(O.date, INTERVAL 40 DAY)
+          ORDER BY P.date ASC
+          LIMIT 1
+        ) AS close_1m
+      FROM `{SECTOR_OPPORTUNITIES_TABLE}` O
+      WHERE (performance_1w_pct IS NULL AND DATE_DIFF(CURRENT_DATE(), date, DAY) BETWEEN 7 AND 15)
+         OR (performance_1m_pct IS NULL AND DATE_DIFF(CURRENT_DATE(), date, DAY) BETWEEN 30 AND 40)
+    ) S
+    ON O.date = S.opp_date AND O.symbol = S.symbol
+    WHEN MATCHED THEN
+      UPDATE SET 
+        performance_1w_pct = COALESCE(O.performance_1w_pct, IF(S.close_1w IS NOT NULL, (S.close_1w - S.opp_close) / S.opp_close * 100, NULL)),
+        performance_1m_pct = COALESCE(O.performance_1m_pct, IF(S.close_1m IS NOT NULL, (S.close_1m - S.opp_close) / S.opp_close * 100, NULL))
+    """
+    try:
+        job = client.query(sql)
+        job.result()
+        logger.info("forward performance updated successfully")
+    except Exception as e:
+        logger.error("error updating forward performance: %s", e)
 
 
 def main() -> None:
@@ -111,6 +166,7 @@ def main() -> None:
     client = bigquery.Client(project=PROJECT_ID)
     ensure_table(client)
     run_sql(client, target_date)
+    update_forward_performance(client)
 
     logger.info("daily_sector_opportunities finished")
 

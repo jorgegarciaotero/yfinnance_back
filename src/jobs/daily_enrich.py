@@ -73,7 +73,15 @@ def main() -> None:
         logger.info("ejecutando incremental (enrich_prices_incremental.bsql)...")
         sql = SQL_INCREMENTAL.read_text(encoding="utf-8")
 
-    client.query(sql).result()
+    job = client.query(sql)
+    try:
+        job.result()
+    except Exception as e:
+        logger.error("BigQuery job failed: %s", e)
+        if getattr(job, "errors", None):
+            logger.error("Job errors: %s", job.errors)
+        raise
+
     logger.info("daily_enrich finished")
 
 

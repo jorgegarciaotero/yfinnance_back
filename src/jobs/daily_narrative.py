@@ -178,7 +178,7 @@ def generate_narrative(
     news_items: list[dict],
 ) -> str:
     if not news_items:
-        return "Movimiento puramente técnico o especulativo. No se han detectado noticias recientes que actúen como catalizador."
+        return "Purely technical or speculative movement. No recent news detected as a catalyst."
 
     news_block = _build_news_block(news_items)
     user_msg = USER_TEMPLATE.format(

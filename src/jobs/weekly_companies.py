@@ -268,8 +268,6 @@ def merge_companies(df: pd.DataFrame) -> None:
     MERGE `{COMPANIES_TABLE}` t
     USING `{stage}` s
       ON t.symbol = s.symbol
-      AND CAST(t.updated_at AS DATE) = CAST(s.updated_at AS DATE)
-
     WHEN MATCHED THEN UPDATE SET
         provider            = s.provider,
         is_active           = s.is_active,
@@ -376,6 +374,7 @@ def main(limit: int | None = None) -> None:
         rows.append({
             "symbol": symbol,
             "source": source,
+            "provider": "yahoo",
             "is_active": is_active,
             "last_checked": now,
             "last_seen": today if is_active else None,

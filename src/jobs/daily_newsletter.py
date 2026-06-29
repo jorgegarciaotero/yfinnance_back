@@ -13,7 +13,7 @@ import logging
 import urllib.request
 import xml.etree.ElementTree as ET
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 import feedparser
 
@@ -72,34 +72,34 @@ SCHEMA = [
 
 CHANNELS = [
     # Grupo Hispanohablante
-    {"id": "UC4NCu44AQXnhscxeDrdgvow", "name": "Alberto Iturralde", "profile": "Foco en psicología de masas, 'manos fuertes' (engaños de mercado) y niveles técnicos clave."},
-    {"id": "UC_jlKkXfh49iBLbS9cbddpQ", "name": "Gustavo Martínez", "profile": "Foco en macroeconomía, tipos de interés reales, oro, bitcoin y ciclo económico."},
-    {"id": "UCll9xzATuTnqGv68xK8tpJg", "name": "Negocios TV", "profile": "Foco en resumen de noticias geopolíticas, bancos centrales y flujo diario."},
+    {"id": "UC4NCu44AQXnhscxeDrdgvow", "name": "Alberto Iturralde", "profile": "Focus on mass psychology, 'smart money' (market traps) and key technical levels."},
+    {"id": "UC_jlKkXfh49iBLbS9cbddpQ", "name": "Gustavo Martínez", "profile": "Focus on macroeconomics, real interest rates, gold, bitcoin and economic cycle."},
+    {"id": "UCll9xzATuTnqGv68xK8tpJg", "name": "Negocios TV", "profile": "Focus on geopolitical news summary, central banks and daily flow."},
     # Grupo Anglosajón
-    {"id": "UCFk1qCySNf2FIzIidVVW81A", "name": "The Macro Compass", "profile": "Foco en análisis de liquidez bancaria global, repo market y modelos macroeconómicos institucionales."},
-    {"id": "UCZ-J2m1AUSLnifUEKam5_dA", "name": "Verified Investing", "profile": "Foco en análisis técnico puro, niveles de precios psicológicos, conteo de ciclos y sentimiento extremo."},
-    {"id": "UCu0L0QCubkYD3Cd9jSdxTNQ", "name": "42 Macro",          "profile": "Foco en regímenes de mercado (Goldilocks, Deflation, Inflation, Reflation) y flujos de capital institucionales."},
+    {"id": "UCFk1qCySNf2FIzIidVVW81A", "name": "The Macro Compass", "profile": "Focus on global bank liquidity analysis, repo market and institutional macroeconomic models."},
+    {"id": "UCZ-J2m1AUSLnifUEKam5_dA", "name": "Verified Investing", "profile": "Focus on pure technical analysis, psychological price levels, cycle counting and extreme sentiment."},
+    {"id": "UCu0L0QCubkYD3Cd9jSdxTNQ", "name": "42 Macro",          "profile": "Focus on market regimes (Goldilocks, Deflation, Inflation, Reflation) and institutional capital flows."},
 ]
 
 RSS_FEEDS = [
-    {"id": "https://www.cnbc.com/id/20910258/device/rss/rss.html",                       "name": "CNBC Economy",        "profile": "Foco en indicadores económicos globales, inflación y bancos centrales."},
-    {"id": "https://finance.yahoo.com/news/rssindex",                                    "name": "Yahoo Finance Top",   "profile": "Foco en las noticias financieras más importantes del día, mercados globales y macroeconomía."},
-    {"id": "https://www.cnbc.com/id/10000664/device/rss/rss.html",                       "name": "CNBC Finance",        "profile": "Foco en mercados de renta variable, renta fija y flujos de capital institucional."},
+    {"id": "https://search.cnbc.com/rs/search/combinedcms/view.xml?profile=12000000&id=10000664", "name": "CNBC Finance",        "profile": "Focus on equity markets, fixed income and institutional capital flows."},
+    {"id": "https://finance.yahoo.com/news/rssindex",                                             "name": "Yahoo Finance Top",   "profile": "Focus on top financial news of the day, global markets and macroeconomics."},
+    {"id": "https://search.cnbc.com/rs/search/combinedcms/view.xml?profile=12000000&id=20910258", "name": "CNBC Economy",        "profile": "Focus on global economic indicators, inflation and central banks."},
 ]
 
 class GlobalMarketAnalyzer:
     SYSTEM_PROMPT_TEMPLATE = (
-        'Eres el motor de análisis de un "Hedge Fund" cuantitativo. Tu tarea es extraer inteligencia de mercado pura y accionable del siguiente texto proporcionado por la fuente: {source_name}.\n\n'
-        'Contexto de la fuente: {source_profile}\n\n'
-        'Instrucción de Idioma Crítica: Independientemente de si el texto original está en inglés, español u otro idioma, debes generar toda tu respuesta en ESPAÑOL.\n\n'
-        'Analiza el texto y devuelve ÚNICAMENTE un JSON válido con la siguiente estructura. No incluyas markdown ni texto fuera del JSON:\n'
+        'You are the analysis engine of a quantitative Hedge Fund. Your task is to extract pure and actionable market intelligence from the following text provided by the source: {source_name}.\n\n'
+        'Source context: {source_profile}\n\n'
+        'Critical Language Instruction: Regardless of whether the original text is in English, Spanish or another language, you MUST generate your entire response in ENGLISH.\n\n'
+        'Analyze the text and return ONLY a valid JSON with the following structure. Do not include markdown or text outside the JSON:\n'
         '{{\n'
         '  "market_bias": "Bullish | Bearish | Neutral | N/A",\n'
-        '  "macro_event": "Evento económico clave mencionado (ej. Fed, IPC, Nóminas). N/A si no hay.",\n'
-        '  "smart_money_signals": "Resumen en 1 frase sobre flujos institucionales, engaños de mercado o liquidez.",\n'
+        '  "macro_event": "Key economic event mentioned (e.g. Fed, CPI, Payrolls). N/A if none.",\n'
+        '  "smart_money_signals": "1-sentence summary about institutional flows, market manipulation, or liquidity.",\n'
         '  "key_levels": [{{"activo": "SP500", "soporte": 5100, "resistencia": 5200}}],\n'
-        '  "activos_mencionados": ["SP500", "Oro", "NVDA"],\n'
-        '  "tesis_principal": "Resumen profundo y detallado de la tesis principal (3 a 5 frases), explicando el por qué de su visión y su contexto."\n'
+        '  "activos_mencionados": ["SP500", "Gold", "NVDA"],\n'
+        '  "tesis_principal": "Deep and detailed summary of the main thesis (3 to 5 sentences), explaining the reasoning behind their view and its context."\n'
         '}}\n'
     )
     
@@ -164,6 +164,14 @@ class GlobalMarketAnalyzer:
         video_id, title, published_str, description = self._get_latest_video_rss(channel["id"])
         if not video_id: return None
 
+        norm_time_str = _normalize_timestamp(published_str)
+        if norm_time_str:
+            pub_dt = datetime.strptime(norm_time_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+            # Evitar procesar vídeos antiguos (más de 3 días)
+            if datetime.now(timezone.utc) - pub_dt > timedelta(days=3):
+                logger.info(f"Omitiendo vídeo antiguo de {channel['name']}: {title} (Publicado el {norm_time_str})")
+                return None
+
         logger.info(f"Analizando último vídeo de {channel['name']}: {title}")
         transcript = self._get_transcript(video_id)
         
@@ -206,8 +214,16 @@ class GlobalMarketAnalyzer:
 
     def analyze_rss(self, feed: dict) -> dict:
         logger.info(f"Analizando RSS de {feed['name']}...")
-        parsed = feedparser.parse(feed["id"])
-        if getattr(parsed, 'bozo', 0) == 1 or not parsed.entries:
+        try:
+            req = urllib.request.Request(feed["id"], headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                rss_data = response.read()
+            parsed = feedparser.parse(rss_data)
+        except Exception as e:
+            logger.error(f"Error fetching RSS {feed['name']}: {e}")
+            return None
+
+        if getattr(parsed, 'bozo', 0) == 1 and not parsed.entries:
             logger.warning(f"No se pudo leer RSS de {feed['name']}")
             return None
 

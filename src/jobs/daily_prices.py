@@ -98,10 +98,15 @@ def get_active_symbols(limit: int | None) -> list[str]:
     limit_sql = f"LIMIT {limit}" if limit else ""
 
     query = f"""
-        SELECT DISTINCT symbol
-        FROM `{COMPANIES_TABLE}`
-        WHERE is_active = TRUE
-          AND symbol IS NOT NULL
+        WITH latest AS (
+            SELECT symbol, is_active,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY updated_at DESC) AS rn
+            FROM `{COMPANIES_TABLE}`
+            WHERE symbol IS NOT NULL
+        )
+        SELECT symbol
+        FROM latest
+        WHERE rn = 1 AND is_active = TRUE
         {limit_sql}
     """
 
@@ -193,15 +198,6 @@ def main(
     limit: int | None = DEFAULT_LIMIT,
 ) -> None:
     logger.info("starting daily_prices job")
-
-    json_path = os.path.join("src", "config", "service-account.json")
-    
-    if os.path.exists(json_path):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = json_path
-        logger.info("Loading credentials from: %s", json_path)
-    else:
-        logger.info("Not found service-account.json, using default credentials")
-
     ensure_table()
 
     symbols = get_active_symbols(limit)
@@ -274,14 +270,30 @@ def main(
 
 
 if __name__ == "__main__":
-    json_path = os.path.join("src", "config", "service-account.json")
-    # sys.argv[0] is the script name
-    # sys.argv[1] is the first argument (start_date / run_date)
-    # sys.argv[2] is the second argument (end_date_arg)
-    arg1 = sys.argv[1] if len(sys.argv) > 1 else None
-    arg2 = sys.argv[2] if len(sys.argv) > 2 else None
-    # Examples:
-    # 1. Automatic (Yesterday): python -m src.jobs.daily_prices
-    # 2. Single Day:           python -m src.jobs.daily_prices 2024-01-01
-    # 3. Date Range:           python -m src.jobs.daily_prices 2024-01-01 2024-01-31
-    main(run_date=arg1, end_date_arg=arg2, limit=None)
+    #python -m src.jobs.daily_prices --date 2026-06-17 2026-06-28
+
+    # 1. Configurar credenciales ANTES de cualquier llamada a la API de Google
+    # Usamos una ruta absoluta para asegurar que se encuentre el archivo sin importar desde dónde se ejecute el script.
+    # __file__ -> daily_prices.py | .parents[2] -> src/ | "config" | "service-account.json"
+    json_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'service-account.json')
+    if os.path.exists(json_path):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = json_path
+        logger.info("Loading credentials from: %s", json_path)
+    else:
+        logger.info("Not found service-account.json, using default credentials")
+
+    # 2. Parsear argumentos de línea de comandos
+    run_date = None
+    end_date = None
+    if "--date" in sys.argv:
+        try:
+            date_index = sys.argv.index("--date") + 1
+            run_date = sys.argv[date_index]
+            if date_index + 1 < len(sys.argv) and not sys.argv[date_index + 1].startswith('--'):
+                end_date = sys.argv[date_index + 1]
+        except (ValueError, IndexError):
+            logger.error("El argumento --date debe ir seguido de una fecha en formato YYYY-MM-DD.")
+            sys.exit(1)
+
+    # 3. Ejecutar la lógica principal
+    main(run_date=run_date, end_date_arg=end_date, limit=None)
